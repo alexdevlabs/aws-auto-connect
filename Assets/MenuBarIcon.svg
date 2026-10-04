@@ -1,0 +1,9 @@
+<!-- Menu bar glyph (template: black + alpha). Drawn natively in StatusIcon.swift; keep the two in sync. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 100 100">
+  <g fill="none" stroke="#000" stroke-width="7" stroke-linecap="round">
+    <path d="M18 82 V52 A32 32 0 0 1 82 52 V82"/>
+    <path d="M31 82 V54 A19 19 0 0 1 69 54 V82" opacity="0.6"/>
+    <path d="M44 82 V57 A6 6 0 0 1 56 57 V82" opacity="0.3"/>
+    <path d="M12 82 H88"/>
+  </g>
+</svg>

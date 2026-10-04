@@ -1,0 +1,50 @@
+Wrap the size macros added by the AWS patch in parentheses.
+
+Unparenthesised, an expression such as `BUF_SIZE_MAX * 2` or `x / TLS_CHANNEL_BUF_SIZE`
+expands with the wrong precedence, and openvpn aborts at start-up with
+"fatal buffer size error, size=45386908936". Applied after openvpn-v2.6.12-aws.patch.
+
+--- a/src/openvpn/buffer.h
++++ b/src/openvpn/buffer.h
+@@ -27,7 +27,7 @@
+ #include "basic.h"
+ #include "error.h"
+ 
+-#define BUF_SIZE_MAX 1 << 21
++#define BUF_SIZE_MAX (1 << 21)
+ 
+ /*
+  * Define verify_align function, otherwise
+--- a/src/openvpn/common.h
++++ b/src/openvpn/common.h
+@@ -66,7 +66,7 @@
+  * maximum size of a single TLS message (cleartext).
+  * This parameter must be >= PUSH_BUNDLE_SIZE
+  */
+-#define TLS_CHANNEL_BUF_SIZE 1 << 18
++#define TLS_CHANNEL_BUF_SIZE (1 << 18)
+ 
+ /* TLS control buffer minimum size
+  *
+--- a/src/openvpn/error.h
++++ b/src/openvpn/error.h
+@@ -37,7 +37,7 @@
+ /*
+  * Increase the error buffer size to 256 KB.
+  */
+-#define ERR_BUF_SIZE 1 << 18
++#define ERR_BUF_SIZE (1 << 18)
+ #endif
+ 
+ struct gc_arena;
+--- a/src/openvpn/misc.h
++++ b/src/openvpn/misc.h
+@@ -68,7 +68,7 @@
+ /*
+  * Increase the username and password length size to 128KB.
+  */
+-#define USER_PASS_LEN 1 << 17
++#define USER_PASS_LEN (1 << 17)
+ #endif
+     /* Note that username and password are expected to be null-terminated */
+     char username[USER_PASS_LEN];
