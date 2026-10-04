@@ -73,3 +73,12 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(HeadlessBrowser.parse("wait"), .wait)
     }
 }
+
+final class AppInstallerTests: XCTestCase {
+    func testHomebrewPath() {
+        let cellar = URL(fileURLWithPath: "/opt/homebrew/Cellar/aws-autoconnect/0.1.0/AWS AutoConnect.app")
+        XCTAssertEqual(AppInstaller.homebrewApp(for: cellar)?.path, "/opt/homebrew/opt/aws-autoconnect/AWS AutoConnect.app")
+        XCTAssertNil(AppInstaller.homebrewApp(for: URL(fileURLWithPath: "/Users/me/Applications/AWS AutoConnect.app")))
+        XCTAssertNil(AppInstaller.homebrewApp(for: URL(fileURLWithPath: "/opt/homebrew/Cellar/other/1.0/AWS AutoConnect.app")))
+    }
+}

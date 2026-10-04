@@ -16,9 +16,11 @@ With Homebrew (builds from source; needs Xcode):
 
 ```bash
 brew install alexdevlabs/tap/aws-autoconnect
-ln -sf "$(brew --prefix aws-autoconnect)/AWS AutoConnect.app" ~/Applications/
-open ~/Applications/"AWS AutoConnect.app"
+open "$(brew --prefix aws-autoconnect)/AWS AutoConnect.app"
 ```
+
+On first start it copies itself to `~/Applications` and runs from there, so it's in Finder, Spotlight
+and Launchpad. After `brew upgrade` the copy updates itself the next time it starts.
 
 Or from a clone:
 

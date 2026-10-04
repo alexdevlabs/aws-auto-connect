@@ -11,9 +11,13 @@ struct SignInSection: View {
             Picker("Provider", selection: $providerID) {
                 ForEach(providers) { Text($0.name).tag($0.id) }
             }
-            Button("Sign in to \(context.providers.provider(id: providerID).name)…") { context.showSignIn() }
-            Button("Clear Browser Session", role: .destructive) {
-                Task { await context.browser.clearSession() }
+            HStack {
+                Button("Sign in to \(context.providers.provider(id: providerID).name)…") { context.showSignIn() }
+                Spacer()
+                Button("Clear Session", role: .destructive) {
+                    Task { await context.browser.clearSession() }
+                }
+                .help("Forget the hidden browser's cookies")
             }
         } header: {
             Text("Browser")

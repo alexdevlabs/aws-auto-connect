@@ -20,10 +20,14 @@ struct VPNSettings: View {
 
             Section {
                 LabeledContent("Helper", value: installed.map { "Installed · \($0)" } ?? "Not installed")
-                Button(installed == nil ? "Install Helper…" : "Reinstall for Selected Profile…") { install() }
-                    .disabled(selectedProfile == nil)
-                if installed != nil {
-                    Button("Uninstall Helper…", role: .destructive) { uninstall() }
+                HStack {
+                    Button(installed == nil ? "Install Helper…" : "Reinstall…") { install() }
+                        .disabled(selectedProfile == nil)
+                        .help(installed == nil ? "Install the helper for the selected profile" : "Reinstall the helper for the selected profile")
+                    Spacer()
+                    if installed != nil {
+                        Button("Uninstall…", role: .destructive) { uninstall() }
+                    }
                 }
             } header: {
                 Text("Tunnel helper")
