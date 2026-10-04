@@ -185,6 +185,14 @@ final class AWSVPNConnector: TunnelConnector {
         state = .disconnected
     }
 
+    /// The tunnel goes down with the app.
+    func stop() async {
+        wantsConnection = false
+        guard VPNHelper.isTunnelRunning else { return }
+        log.info("app quitting, disconnecting")
+        await disconnect()
+    }
+
     /// Syncs state with the tunnel process. Returns true if a live tunnel just died.
     func checkTunnel() -> Bool {
         let running = VPNHelper.isTunnelRunning

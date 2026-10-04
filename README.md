@@ -44,7 +44,7 @@ Needs macOS 14+, Xcode 16+ and Homebrew `openssl@3`.
 | Connector | Keeps | How |
 |---|---|---|
 | **AWS SSO** | an `sso-session` from `~/.aws/config` | Every minute it reads the CLI's token cache. Near expiry it runs `aws configure export-credentials` (silent refresh). If that isn't enough, it runs `aws sso login` and the hidden browser clicks "Confirm and continue" / "Allow access". |
-| **AWS Client VPN** | a tunnel from an AWS VPN Client profile | SAML sign-in in the hidden browser, then the root helper starts the patched openvpn. Optional reconnect after drops and wake. Owns the DNS relay below. |
+| **AWS Client VPN** | a tunnel from an AWS VPN Client profile | SAML sign-in in the hidden browser, then the root helper starts the patched openvpn. Optional reconnect after drops and wake. Quitting the app closes the tunnel. Owns the DNS relay below. |
 | **Grafana (gcx)** | the `gcx` CLI login | Every few minutes it runs `gcx api /api/user`. When that's rejected it runs `gcx auth login` and presses OK on Grafana's page. Can wait for the VPN if your stack is behind it. |
 
 Connectors are stored as a list (`ConnectorStore`), so several of a type are possible later. The panel

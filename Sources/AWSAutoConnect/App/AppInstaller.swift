@@ -81,7 +81,7 @@ enum AppInstaller {
     private static func quitCopyInApplications() {
         guard let copy = copyInApplications() else { return }
         copy.terminate()
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(20) // it closes the VPN first
         while !copy.isTerminated, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
     }
 

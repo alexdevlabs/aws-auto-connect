@@ -99,6 +99,12 @@ final class AppModel {
         connectors = list
     }
 
+    /// Stops every connector (including ones turned off while running), e.g. closes the VPN.
+    func shutdown() async {
+        timer?.invalidate()
+        for connector in instances.values { await connector.stop() }
+    }
+
     // MARK: Status
 
     var health: ConnectorStatus.Health {

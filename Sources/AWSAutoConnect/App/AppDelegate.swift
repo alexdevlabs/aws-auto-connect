@@ -7,8 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private let model = AppModel()
     private var statusItem: NSStatusItem!
     private var panel: DropdownPanel!
+    private var termSource: DispatchSourceSignal?
+    private var quitting = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        handleTermSignal()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePanel)
@@ -26,6 +29,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.panel.saveSnapshot() }
             }
         }
+    }
+
+    /// Quitting (menu, logout, `kill`, an update replacing the app) closes the VPN first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if quitting { return .terminateLater }
+        guard VPNHelper.isTunnelRunning else { return .terminateNow }
+        quitting = true
+        panel?.close()
+        Task {
+            await model.shutdown()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    /// SIGTERM (`kill`, `pkill`) goes through the normal quit so the VPN is closed too.
+    private func handleTermSignal() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        // Quit from the run loop, not from inside this main-queue block: the shutdown work below
+        // also runs on the main queue and would wait behind it forever.
+        source.setEventHandler { RunLoop.main.perform { NSApp.terminate(nil) } }
+        source.resume()
+        termSource = source
     }
 
     // Clicking a notification opens the sign-in window if a flow is waiting on it.

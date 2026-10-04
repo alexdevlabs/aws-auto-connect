@@ -32,6 +32,8 @@ protocol Connector: AnyObject {
 
     /// Called once after launch.
     func start()
+    /// Called when the app quits: close anything that shouldn't outlive it.
+    func stop() async
     /// Called every minute and shortly after the Mac wakes.
     func tick(afterWake: Bool)
 }
@@ -39,6 +41,7 @@ protocol Connector: AnyObject {
 extension Connector {
     var signInPage: SignInPage? { nil }
     func start() {}
+    func stop() async {}
 }
 
 /// A connector that holds a tunnel; the app tells the others whether one is up.
