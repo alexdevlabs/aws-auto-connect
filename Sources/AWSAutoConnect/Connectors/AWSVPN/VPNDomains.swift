@@ -19,11 +19,13 @@ final class VPNDomains {
     /// Newest first.
     private(set) var learned: [Entry] = []
     var allowlistOn: Bool {
-        didSet { UserDefaults.standard.set(allowlistOn, forKey: Prefs.Key.dnsAllowlistEnabled.rawValue); push() }
+        didSet { onChange?(allowlistOn, allowlist); push() }
     }
     private(set) var allowlist: [String] {
-        didSet { UserDefaults.standard.set(allowlist.joined(separator: "\n"), forKey: Prefs.Key.dnsAllowlist.rawValue); push() }
+        didSet { onChange?(allowlistOn, allowlist); push() }
     }
+    /// Saves the toggle and list (the connector keeps them in its settings).
+    @ObservationIgnored var onChange: ((Bool, [String]) -> Void)?
     private(set) var scanStatus: String?
 
     static let logPath = "/var/run/aws-autoconnect/dns-learned.log"
@@ -32,7 +34,7 @@ final class VPNDomains {
     @ObservationIgnored private let log = AppLog("dns")
     @ObservationIgnored private var offset: UInt64 = 0
     @ObservationIgnored private var inode: UInt64 = 0
-    @ObservationIgnored private let storeURL = FileManager.default.homeDirectoryForCurrentUser
+    @ObservationIgnored private var storeURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/AWSAutoConnect/vpn-domains.json")
 
     private struct Stored: Codable {
@@ -41,10 +43,11 @@ final class VPNDomains {
         var entries: [Entry]
     }
 
-    init() {
-        allowlistOn = Prefs.dnsAllowlistEnabled
-        allowlist = Prefs.dnsAllowlist
-        if let data = try? Data(contentsOf: storeURL), let s = try? JSONDecoder().decode(Stored.self, from: data) {
+    init(allowlistOn: Bool, allowlist: [String], storeURL: URL? = nil) {
+        self.allowlistOn = allowlistOn
+        self.allowlist = allowlist
+        if let storeURL { self.storeURL = storeURL }
+        if let data = try? Data(contentsOf: self.storeURL), let s = try? JSONDecoder().decode(Stored.self, from: data) {
             offset = s.offset
             inode = s.inode
             learned = s.entries.sorted { $0.last > $1.last }

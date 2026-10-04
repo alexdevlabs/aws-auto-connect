@@ -1,102 +1,7 @@
-import ServiceManagement
 import SwiftUI
 
-// Settings sections shown inside the menu bar panel.
-
-struct GeneralSettings: View {
-    @AppStorage(Prefs.Key.notifications.rawValue) private var notifications = true
-    @AppStorage(Prefs.Key.quietEnabled.rawValue) private var quietEnabled = false
-    @AppStorage(Prefs.Key.quietFrom.rawValue) private var quietFrom = 19
-    @AppStorage(Prefs.Key.quietTo.rawValue) private var quietTo = 8
-    @AppStorage(Prefs.Key.quietWeekends.rawValue) private var quietWeekends = false
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var error: String?
-
-    var body: some View {
-        Form {
-            Toggle("Launch at login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, on in
-                    do {
-                        if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-                        error = nil
-                    } catch let e {
-                        error = e.localizedDescription
-                        launchAtLogin = SMAppService.mainApp.status == .enabled
-                    }
-                }
-            Toggle("Notifications", isOn: $notifications)
-
-            Section {
-                Toggle("Pause every day", isOn: $quietEnabled)
-                if quietEnabled {
-                    Picker("From", selection: $quietFrom) { hours }
-                    Picker("To", selection: $quietTo) { hours }
-                }
-                Toggle("Pause on weekends", isOn: $quietWeekends)
-            } header: {
-                Text("Quiet hours")
-            } footer: {
-                Text("No automatic refresh or reconnect.").font(.caption).foregroundStyle(.secondary)
-            }
-
-            if let error {
-                Text(error).foregroundStyle(.red).font(.caption)
-            }
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-    }
-
-    private var hours: some View {
-        ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
-    }
-}
-
-struct SSOSettings: View {
-    let model: AppModel
-    @AppStorage(Prefs.Key.autoRefreshSSO.rawValue) private var autoRefresh = true
-    @AppStorage(Prefs.Key.ssoSession.rawValue) private var sessionName = ""
-    @AppStorage(Prefs.Key.refreshLeadMinutes.rawValue) private var lead = 10
-    @State private var sessions = AWSConfig.ssoSessions()
-
-    var body: some View {
-        Form {
-            Toggle("Refresh automatically", isOn: $autoRefresh)
-            if sessions.isEmpty {
-                LabeledContent("Session", value: "None in ~/.aws/config")
-            } else {
-                Picker("Session", selection: $sessionName) {
-                    ForEach(sessions) { Text($0.name).tag($0.name) }
-                }
-            }
-            Section {
-                Stepper("\(lead) min before expiry", value: $lead, in: 5...120, step: 5)
-            } footer: {
-                Text("≤ 10 min uses the CLI's silent refresh. More approves a new login in the hidden browser.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Browser") {
-                Button("Sign in to Google…") { model.showSignIn() }
-                Button("Clear Browser Session", role: .destructive) {
-                    Task { await model.clearBrowserSession() }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .onAppear {
-            sessions = AWSConfig.ssoSessions()
-            if !sessions.contains(where: { $0.name == sessionName }), let first = sessions.first {
-                sessionName = first.name
-            }
-        }
-    }
-}
-
 struct VPNSettings: View {
-    @AppStorage(Prefs.Key.vpnProfile.rawValue) private var profileName = ""
-    @AppStorage(Prefs.Key.vpnConnectAtLaunch.rawValue) private var connectAtLaunch = false
-    @AppStorage(Prefs.Key.vpnReconnect.rawValue) private var reconnect = false
+    @Bindable var connector: AWSVPNConnector
     @State private var profiles = VPNProfile.all()
     @State private var installed = VPNHelper.installedProfileName
     @State private var error: String?
@@ -106,12 +11,12 @@ struct VPNSettings: View {
             if profiles.isEmpty {
                 LabeledContent("Profile", value: "No AWS VPN Client profiles")
             } else {
-                Picker("Profile", selection: $profileName) {
+                Picker("Profile", selection: $connector.profileName) {
                     ForEach(profiles) { Text($0.name).tag($0.name) }
                 }
             }
-            Toggle("Connect when the app starts", isOn: $connectAtLaunch)
-            Toggle("Reconnect if dropped or after wake", isOn: $reconnect)
+            Toggle("Connect when the app starts", isOn: $connector.connectAtLaunch)
+            Toggle("Reconnect if dropped or after wake", isOn: $connector.reconnect)
 
             Section {
                 LabeledContent("Helper", value: installed.map { "Installed · \($0)" } ?? "Not installed")
@@ -136,13 +41,13 @@ struct VPNSettings: View {
         .onAppear {
             profiles = VPNProfile.all()
             installed = VPNHelper.installedProfileName
-            if !profiles.contains(where: { $0.name == profileName }), let first = profiles.first {
-                profileName = first.name
+            if !profiles.contains(where: { $0.name == connector.profileName }), let first = profiles.first {
+                connector.profileName = first.name
             }
         }
     }
 
-    private var selectedProfile: VPNProfile? { profiles.first { $0.name == profileName } }
+    private var selectedProfile: VPNProfile? { profiles.first { $0.name == connector.profileName } }
 
     private func install() {
         guard let profile = selectedProfile else { return }
@@ -165,11 +70,11 @@ struct VPNSettings: View {
 }
 
 struct DNSSettings: View {
-    let model: AppModel
+    let connector: AWSVPNConnector
     @State private var newDomain = ""
     @State private var scanning = false
 
-    private var domains: VPNDomains { model.domains }
+    private var domains: VPNDomains { connector.domains }
 
     var body: some View {
         @Bindable var domains = domains
@@ -221,7 +126,7 @@ struct DNSSettings: View {
                     Menu {
                         Button("Allow All") { domains.allowAllLearned() }.disabled(domains.learned.isEmpty)
                         Button("Scan Config Files") { scan() }
-                            .disabled(scanning || model.vpn.state != .connected || !VPNDomains.relayInstalled)
+                            .disabled(scanning || !connector.isConnected || !VPNDomains.relayInstalled)
                         Divider()
                         Button("Clear List", role: .destructive) { domains.clearLearned() }.disabled(domains.learned.isEmpty)
                     } label: {

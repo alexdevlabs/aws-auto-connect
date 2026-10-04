@@ -2,93 +2,18 @@ import AppKit
 import Foundation
 import Observation
 
-/// A profile from the official AWS VPN Client (~/.config/AWSVPNClient/ConnectionProfiles).
-struct VPNProfile: Hashable, Identifiable {
-    let name: String
-    let configPath: String
-    var id: String { name }
-
-    static func all() -> [VPNProfile] {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/AWSVPNClient/ConnectionProfiles")
-        guard let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let list = json["ConnectionProfiles"] as? [[String: Any]] else { return [] }
-        return list.compactMap { p in
-            guard let name = p["ProfileName"] as? String, let path = p["OvpnConfigFilePath"] as? String else { return nil }
-            return VPNProfile(name: name, configPath: path)
-        }
-    }
-}
-
-/// The root-owned pieces installed by helper/install-helper.sh.
-enum VPNHelper {
-    static let dir = "/usr/local/libexec/aws-autoconnect"
-    static let helper = dir + "/vpn-helper"
-    static let openvpn = dir + "/openvpn"
-    static let etc = "/usr/local/etc/aws-autoconnect"
-    static let profile = etc + "/profile.ovpn"
-    static let sudoers = "/etc/sudoers.d/aws-autoconnect"
-    static let pidFile = "/var/run/aws-autoconnect/openvpn.pid"
-    static let logFile = "/var/log/aws-autoconnect.log"
-
-    static var isInstalled: Bool {
-        FileManager.default.isExecutableFile(atPath: helper) && FileManager.default.fileExists(atPath: sudoers)
-    }
-
-    static var installedProfileName: String? {
-        guard isInstalled else { return nil }
-        return (try? String(contentsOfFile: etc + "/profile.name", encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// (host, port, proto) of the installed profile.
-    static func endpoint() throws -> (host: String, port: String, proto: String) {
-        let raw = (try? String(contentsOfFile: etc + "/endpoint", encoding: .utf8)) ?? ""
-        let parts = raw.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard parts.count == 3 else { throw AppError("VPN helper not installed – open Settings ▸ VPN") }
-        return (parts[0], parts[1], parts[2])
-    }
-
-    static var isTunnelRunning: Bool {
-        guard let raw = try? String(contentsOfFile: pidFile, encoding: .utf8),
-              let pid = pid_t(raw.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 else { return false }
-        // The tunnel runs as root, so EPERM still means "alive".
-        return kill(pid, 0) == 0 || errno == EPERM
-    }
-
-    static func install(_ profile: VPNProfile) throws {
-        guard let res = Bundle.main.resourcePath else { throw AppError("Missing app resources") }
-        try runAsAdmin(script: res + "/install-helper.sh", args: [res, profile.configPath, profile.name, NSUserName()])
-    }
-
-    static func uninstall() throws {
-        guard let res = Bundle.main.resourcePath else { throw AppError("Missing app resources") }
-        try runAsAdmin(script: res + "/uninstall-helper.sh", args: [])
-    }
-
-    /// Shows the standard macOS admin password prompt and runs a bundled script as root.
-    private static func runAsAdmin(script: String, args: [String]) throws {
-        func quoted(_ s: String) -> String {
-            "quoted form of \"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
-        }
-        let command = ([quoted("/bin/bash"), quoted(script)] + args.map(quoted)).joined(separator: " & \" \" & ")
-        let source = "do shell script \(command) with administrator privileges"
-        var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
-        if let error {
-            throw AppError(error[NSAppleScript.errorMessage] as? String ?? "Admin script failed")
-        }
-    }
-}
-
 /// Connects AWS Client VPN with SAML using the patched openvpn:
 /// 1. openvpn (as you) gets an AUTH_FAILED,CRV1 challenge with the SAML URL,
-/// 2. the hidden browser signs in and Google posts the assertion to 127.0.0.1:35001,
+/// 2. the hidden browser signs in and the provider posts the assertion to 127.0.0.1:35001,
 /// 3. the root helper starts openvpn again with `CRV1::<sid>::<assertion>` as the password.
+/// Also owns DNS learning and the allowlist (`VPNDomains`), which the root helper's relay uses.
 @MainActor
 @Observable
-final class VPNController {
+final class AWSVPNConnector: TunnelConnector {
+    static let type = "aws-vpn"
+    static let displayName = "AWS Client VPN"
+    static let enabledByDefault = true
+
     enum State: Equatable {
         case disconnected
         case connecting(String)
@@ -96,40 +21,105 @@ final class VPNController {
         case failed(String)
     }
 
-    private(set) var state: State = .disconnected { didSet { onChange?() } }
+    var config: ConnectorConfig { didSet { context.store.save(config) } }
+    private(set) var state: State = .disconnected
     /// Whether you asked to be connected; drives reconnects.
     private(set) var wantsConnection = false
+    let domains: VPNDomains
 
-    @ObservationIgnored var onChange: (() -> Void)?
-    /// Runs right before the root helper starts the tunnel (sends the DNS allowlist).
-    @ObservationIgnored var beforeTunnel: (() async -> Void)?
-    @ObservationIgnored private let browser: HeadlessBrowser
+    @ObservationIgnored private let context: ConnectorContext
+    private var browser: HeadlessBrowser { context.browser }
     @ObservationIgnored private let log = AppLog("vpn")
 
-    init(browser: HeadlessBrowser) {
-        self.browser = browser
+    init(config: ConnectorConfig, context: ConnectorContext) {
+        self.config = config
+        self.context = context
+        domains = VPNDomains(allowlistOn: config.bool("allowlistOn", default: false),
+                             allowlist: config.string("allowlist").split(separator: "\n").map(String.init))
+        domains.onChange = { [weak self] on, list in
+            self?.config.set("allowlistOn", on)
+            self?.config.set("allowlist", list.joined(separator: "\n"))
+        }
         if VPNHelper.isTunnelRunning {
             state = .connected
             wantsConnection = true
         }
     }
 
+    // MARK: Settings
+
+    /// AWS VPN Client profile the helper is installed for.
+    var profileName: String {
+        get { config.string("profile") }
+        set { config.set("profile", newValue) }
+    }
+    var connectAtLaunch: Bool {
+        get { config.bool("connectAtLaunch", default: false) }
+        set { config.set("connectAtLaunch", newValue) }
+    }
+    var reconnect: Bool {
+        get { config.bool("reconnect", default: false) }
+        set { config.set("reconnect", newValue) }
+    }
+
+    // MARK: Connector
+
+    let title = "VPN"
+    let symbol = "network"
+    var isConnected: Bool { state == .connected }
     var isBusy: Bool { if case .connecting = state { return true } else { return false } }
 
-    var summary: String {
+    var status: ConnectorStatus {
         switch state {
-        case .disconnected: return "Disconnected"
-        case .connecting(let step): return "Connecting – \(step)…"
-        case .connected: return "Connected" + (VPNHelper.installedProfileName.map { " (\($0))" } ?? "")
-        case .failed(let msg): return msg
+        case .disconnected: return .init(health: .idle, summary: "Disconnected")
+        case .connecting(let step): return .init(health: .busy, summary: "Connecting – \(step)…")
+        case .connected:
+            return .init(health: .ok, summary: "Connected" + (VPNHelper.installedProfileName.map { " (\($0))" } ?? ""))
+        case .failed(let msg): return .init(health: .attention, summary: msg)
         }
     }
+
+    var actions: [ConnectorAction] {
+        if state == .connected || isBusy {
+            return [ConnectorAction(title: "Disconnect") { [weak self] in await self?.disconnect() }]
+        }
+        return [ConnectorAction(title: "Connect", enabled: VPNHelper.isInstalled) { [weak self] in await self?.connect() }]
+    }
+
+    var settingsTabs: [SettingsTab] {
+        [
+            SettingsTab("VPN", height: 340) { VPNSettings(connector: self) },
+            SettingsTab("DNS", height: 420) { DNSSettings(connector: self) },
+        ]
+    }
+
+    func start() {
+        if connectAtLaunch, !context.isQuiet, !VPNHelper.isTunnelRunning {
+            Task { await connect() }
+        }
+    }
+
+    func tick(afterWake: Bool) {
+        domains.ingest()
+        let dropped = checkTunnel()
+        let shouldReconnect = reconnect && !context.isQuiet && wantsConnection && !isBusy
+        if dropped || (afterWake && !VPNHelper.isTunnelRunning && wantsConnection) {
+            if shouldReconnect {
+                log.info("reconnecting VPN")
+                Task { await connect() }
+            } else if dropped {
+                context.notify("VPN disconnected", "The tunnel dropped. Reconnect from the menu bar.")
+            }
+        }
+    }
+
+    // MARK: Connect
 
     func connect() async {
         guard !isBusy else { return }
         wantsConnection = true
         do {
-            guard VPNHelper.isInstalled else { throw AppError("VPN helper not installed – open Settings ▸ VPN") }
+            guard VPNHelper.isInstalled else { throw AppError("VPN helper not installed – open the VPN tab") }
             if VPNHelper.isTunnelRunning {
                 state = .connected
                 return
@@ -141,17 +131,20 @@ final class VPNController {
             let prefix = (0..<12).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
             let ip = try await Self.resolveIPv4("\(prefix).\(ep.host)")
 
-            let server = SAMLServer()
+            let server = FormPostListener(port: 35001, field: "SAMLResponse",
+                                          busyHint: " (is the AWS VPN Client connecting?)",
+                                          thanks: "VPN sign-in received. You can close this.")
             try server.start()
             defer { server.stop() }
 
-            // Wait for an SSO refresh using the browser first: the challenge below expires.
+            // Wait for another connector using the browser first: the challenge below expires.
+            let provider = context.provider(for: config)
             let (sid, saml) = try await browser.exclusive {
                 state = .connecting("requesting sign-in")
                 let (sid, url) = try await requestChallenge(ip: ip, port: ep.port, proto: ep.proto)
 
                 state = .connecting("signing in")
-                browser.automate(url)
+                browser.automate(BrowserJob(url: url, providers: [provider], approvals: []))
                 let watchdog = Task { [browser] in
                     var waited = 0
                     while waited < 600 {
@@ -168,7 +161,7 @@ final class VPNController {
             }
 
             state = .connecting("starting tunnel")
-            await beforeTunnel?()
+            await domains.sync()
             let auth = FileManager.default.temporaryDirectory.appendingPathComponent("aws-autoconnect-\(UUID().uuidString)")
             try Self.writePrivate("N/A\nCRV1::\(sid)::\(saml)\n", to: auth)
             defer { try? FileManager.default.removeItem(at: auth) }

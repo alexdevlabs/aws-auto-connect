@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Shell scripts parse
+        run: for f in helper/*.sh helper/vpn-helper scripts/*.sh; do bash -n "$f"; done
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test

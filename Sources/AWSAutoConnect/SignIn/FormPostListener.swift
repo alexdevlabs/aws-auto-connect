@@ -1,25 +1,37 @@
 import Foundation
 import Network
 
-/// One-shot HTTP listener on 127.0.0.1:35001 that captures the SAMLResponse
-/// form field the AWS Client VPN SAML app posts back after sign-in.
-final class SAMLServer: @unchecked Sendable {
-    static let port: NWEndpoint.Port = 35001
+/// One-shot HTTP listener on 127.0.0.1 that captures one form field a sign-in page posts back,
+/// e.g. the SAMLResponse the AWS Client VPN SAML app posts to port 35001.
+final class FormPostListener: @unchecked Sendable {
+    let port: NWEndpoint.Port
+    let field: String
+    /// Added to the error when the port is taken.
+    let busyHint: String
+    /// Shown in the browser once the field arrived.
+    let thanks: String
 
-    private let queue = DispatchQueue(label: "aws-autoconnect.saml")
+    private let queue = DispatchQueue(label: "aws-autoconnect.form-post")
     private var listener: NWListener?
     private var continuation: CheckedContinuation<String, Error>?
     private var result: Result<String, Error>?
 
+    init(port: NWEndpoint.Port, field: String, busyHint: String = "", thanks: String = "Sign-in received. You can close this.") {
+        self.port = port
+        self.field = field
+        self.busyHint = busyHint
+        self.thanks = thanks
+    }
+
     func start() throws {
         let params = NWParameters.tcp
-        params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: Self.port)
+        params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port)
         params.allowLocalEndpointReuse = true
         let listener = try NWListener(using: params)
         listener.newConnectionHandler = { [weak self] conn in self?.handle(conn) }
         listener.stateUpdateHandler = { [weak self] state in
-            if case .failed(let error) = state {
-                self?.finish(.failure(AppError("Port 35001 is busy (is the AWS VPN Client connecting?): \(error)")))
+            if case .failed(let error) = state, let self {
+                self.finish(.failure(AppError("Port \(self.port) is busy\(self.busyHint): \(error)")))
             }
         }
         listener.start(queue: queue)
@@ -78,13 +90,13 @@ final class SAMLServer: @unchecked Sendable {
     }
 
     private func respond(_ conn: NWConnection, body: Data) {
-        let saml = Self.formValue("SAMLResponse", in: String(decoding: body, as: UTF8.self))
-        let page = saml == nil
+        let value = Self.formValue(field, in: String(decoding: body, as: UTF8.self))
+        let page = value == nil
             ? "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             : "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-                + "<html><body style='font:15px -apple-system;padding:2em'>VPN sign-in received. You can close this.</body></html>"
+                + "<html><body style='font:15px -apple-system;padding:2em'>\(thanks)</body></html>"
         conn.send(content: Data(page.utf8), completion: .contentProcessed { _ in conn.cancel() })
-        if let saml { finish(.success(saml)) }
+        if let value { finish(.success(value)) }
     }
 
     /// Returns the request body once the headers and Content-Length bytes have arrived.

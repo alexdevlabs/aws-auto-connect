@@ -25,7 +25,11 @@ struct AppLog: Sendable {
         Self.append("[\(category)] ERROR \(message)")
     }
 
+    /// Unit tests log to the unified log only.
+    private static let testing = NSClassFromString("XCTestCase") != nil
+
     private static func append(_ line: String) {
+        guard !testing else { return }
         let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withInternetDateTime])
         let data = Data("\(stamp) \(line)\n".utf8)
         queue.async {

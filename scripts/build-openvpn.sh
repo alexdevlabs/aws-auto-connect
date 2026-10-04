@@ -7,6 +7,9 @@
 #   AWS patch https://github.com/aws-vpn-client/aws-vpn-client (successor of the archived
 #             samm-git/aws-vpn-client), file openvpn-v2.6.12-aws.patch at a fixed commit
 #   our fix   vendor/openvpn-aws-size-macros.patch, applied on top
+#
+# OPENVPN_TARBALL and AWS_PATCH_FILE can point at already downloaded copies (the Homebrew formula
+# does this; its build has no network). OPENSSL_PREFIX overrides `brew --prefix openssl@3`.
 set -euo pipefail
 
 VERSION=2.6.12
@@ -16,18 +19,20 @@ AWS_PATCH_SHA256=561f0887a7043452cff55f3140539f18c7a63e914343047c98f82a121f35645
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/.build/openvpn"
 OUT="$ROOT/Resources/openvpn"
-SSL="$(brew --prefix openssl@3)"
+SSL="${OPENSSL_PREFIX:-$(brew --prefix openssl@3)}"
 
 mkdir -p "$WORK" "$(dirname "$OUT")"
 cd "$WORK"
 
 TARBALL="openvpn-$VERSION.tar.gz"
+[ -n "${OPENVPN_TARBALL:-}" ] && cp "$OPENVPN_TARBALL" "$TARBALL"
 if [ ! -f "$TARBALL" ]; then
   curl -fL -o "$TARBALL" "https://swupdate.openvpn.org/community/releases/$TARBALL"
 fi
 echo "$SHA256  $TARBALL" | shasum -a 256 -c -
 
 AWS_PATCH="openvpn-v$VERSION-aws.patch"
+[ -n "${AWS_PATCH_FILE:-}" ] && cp "$AWS_PATCH_FILE" "$AWS_PATCH"
 if [ ! -f "$AWS_PATCH" ]; then
   curl -fL -o "$AWS_PATCH" \
     "https://raw.githubusercontent.com/aws-vpn-client/aws-vpn-client/$AWS_PATCH_COMMIT/$AWS_PATCH"

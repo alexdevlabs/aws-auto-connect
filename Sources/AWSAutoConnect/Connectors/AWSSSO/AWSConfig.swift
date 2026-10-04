@@ -20,7 +20,10 @@ enum AWSConfig {
     }
 
     static func sections() -> [Section] {
-        guard let text = try? String(contentsOf: configURL, encoding: .utf8) else { return [] }
+        sections(in: (try? String(contentsOf: configURL, encoding: .utf8)) ?? "")
+    }
+
+    static func sections(in text: String) -> [Section] {
         var out: [Section] = []
         for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
@@ -38,8 +41,8 @@ enum AWSConfig {
         return out
     }
 
-    static func ssoSessions() -> [SSOSession] {
-        sections().compactMap { s in
+    static func ssoSessions(_ sections: [Section] = AWSConfig.sections()) -> [SSOSession] {
+        sections.compactMap { s in
             guard s.name.hasPrefix("sso-session "),
                   let url = s.values["sso_start_url"],
                   let region = s.values["sso_region"] else { return nil }
@@ -49,8 +52,8 @@ enum AWSConfig {
     }
 
     /// Any profile that uses the given sso-session; used to trigger a silent token refresh.
-    static func profile(using session: String) -> String? {
-        for s in sections() where s.values["sso_session"] == session {
+    static func profile(using session: String, in sections: [Section] = AWSConfig.sections()) -> String? {
+        for s in sections where s.values["sso_session"] == session {
             if s.name == "default" { return "default" }
             if s.name.hasPrefix("profile ") {
                 return String(s.name.dropFirst("profile ".count)).trimmingCharacters(in: .whitespaces)

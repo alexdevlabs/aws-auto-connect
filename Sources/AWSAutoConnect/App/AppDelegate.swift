@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func refreshIcon() {
         statusItem.button?.image = StatusIcon.image(for: model.health)
-        statusItem.button?.toolTip = "SSO: \(model.ssoSummary)\nVPN: \(model.vpn.summary)"
+        statusItem.button?.toolTip = model.tooltip
     }
 }
 

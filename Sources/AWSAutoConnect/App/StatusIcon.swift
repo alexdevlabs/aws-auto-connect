@@ -2,7 +2,7 @@ import AppKit
 
 /// The "Tunnel" mark (Assets/MenuBarIcon.svg) in the menu bar's text colour, with a small status dot.
 enum StatusIcon {
-    static func image(for health: AppModel.Health) -> NSImage {
+    static func image(for health: ConnectorStatus.Health) -> NSImage {
         let dot: NSColor? = switch health {
         case .idle: nil
         case .ok: .systemGreen

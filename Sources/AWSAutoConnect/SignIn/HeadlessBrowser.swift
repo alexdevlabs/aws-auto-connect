@@ -1,25 +1,48 @@
 import AppKit
 import WebKit
 
-/// A hidden WebKit browser with a persistent cookie store. It holds the Google
-/// session, clicks through the AWS approval and Google account-picker pages,
-/// and only shows itself when Google asks you to sign in.
+/// What the hidden browser should do with a page: the sign-in providers it may pass through and the
+/// connector's own pages it may click on.
+struct BrowserJob {
+    var url: URL
+    /// The chosen provider first; `IdentityProvider.generic` is always added as the last fallback.
+    var providers: [IdentityProvider]
+    var approvals: [ApprovalRules]
+    /// If a sign-in on the way drops the #fragment page (e.g. AWS's #/device?user_code=…) and lands on
+    /// the same host's home page instead, load `url` again.
+    var reopenIfFragmentLost = false
+}
+
+/// A connector's own pages, where the hidden browser clicks through approval prompts.
+struct ApprovalRules: Codable, Equatable {
+    /// Hosts (each also matches its subdomains).
+    var hosts: [String]
+    /// Regex for the whole button label, case-insensitive, e.g. "^(allow access|confirm)$".
+    var buttons: String
+    /// Regex on the page text that means the flow is finished.
+    var done: String?
+}
+
+/// A hidden WebKit browser with a persistent cookie store. It holds the sign-in provider's session,
+/// clicks through the approval and account-picker pages a `BrowserJob` allows, and only shows itself
+/// when the provider asks you to sign in.
 @MainActor
 final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
-    private enum PageState: String { case wait, login, done, clicked }
+    enum PageState: Equatable { case wait, done, clicked, login(provider: String) }
 
     // Google refuses sign-in from browsers it doesn't recognise, so present as Safari.
     static let safariUserAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
     private let log = AppLog("browser")
-    private let webView: WKWebView
+    let webView: WKWebView
     private let window: NSWindow
     private var pollTask: Task<Void, Never>?
-    /// Manual "Sign in to Google…": close the window once we're back on the AWS portal.
-    private var manualSignIn = false
-    private var sawGoogle = false
-    /// SSO refresh and VPN sign-in take turns: each one's `stop()` would cut off the other's clicking.
+    private var job: BrowserJob?
+    /// Manual "Sign in to …": closes the window once `signInFinished` says so.
+    private var signInFinished: ((URL) -> Bool)?
+    private var sawProvider = false
+    /// Connectors take turns: each one's `stop()` would cut off another's clicking.
     private var inUse = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
@@ -27,9 +50,11 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
     private(set) var needsUser = false {
         didSet { if needsUser != oldValue { onNeedsUserChange?(needsUser) } }
     }
-    /// Called when a page starts or stops needing the user (e.g. a Google sign-in form).
+    /// Name of the provider whose sign-in page is waiting for you.
+    private(set) var waitingProvider: String?
+    /// Called when a page starts or stops needing the user (e.g. a sign-in form).
     var onNeedsUserChange: ((Bool) -> Void)?
-    /// Called after a manual sign-in lands back on the AWS portal (true if Google was visited).
+    /// Called after a manual sign-in finishes (true if a provider page was visited on the way).
     var onSignedIn: ((Bool) -> Void)?
 
     override init() {
@@ -65,11 +90,13 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         return try await body()
     }
 
-    /// Loads `url` out of sight and keeps clicking known approval buttons until `stop()`.
-    func automate(_ url: URL) {
+    /// Loads the job's URL out of sight and keeps clicking what it allows until `stop()`.
+    func automate(_ job: BrowserJob) {
         stop()
-        log.info("automating \(url.host ?? "?")")
-        webView.load(URLRequest(url: url))
+        let script = Self.script(for: job)
+        self.job = job
+        log.info("automating \(job.url.host ?? "?")")
+        webView.load(URLRequest(url: job.url))
         pollTask = Task { [weak self] in
             var loginStreak = 0
             var offPageStreak = 0
@@ -77,23 +104,25 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(1200))
                 guard let self, !Task.isCancelled else { return }
-                let state = await self.step()
-                loginStreak = state == .login ? loginStreak + 1 : 0
-                // When the portal session has expired, AWS signs in again via Google but then lands on the
-                // portal's home page and forgets the approval page (its #/device?user_code=… fragment).
-                // Go back to it.
-                offPageStreak = state == .wait && self.lostPage(of: url) ? offPageStreak + 1 : 0
+                let state = await self.step(script)
+                var provider: String?
+                if case .login(let name) = state { provider = name }
+                loginStreak = provider != nil ? loginStreak + 1 : 0
+                // When the service's session has expired, it may send you through the provider and then
+                // land on its home page, forgetting the page you came for. Go back to it.
+                offPageStreak = job.reopenIfFragmentLost && state == .wait && self.lostPage(of: job.url) ? offPageStreak + 1 : 0
                 if offPageStreak == 3, reopened < 3 {
                     reopened += 1
                     offPageStreak = 0
-                    self.log.info("signed in again, reopening the approval page")
-                    self.webView.load(URLRequest(url: url))
+                    self.log.info("signed in again, reopening \(job.url.host ?? "?")")
+                    self.webView.load(URLRequest(url: job.url))
                 }
                 if loginStreak == 2, !self.needsUser {
                     // Don't jump in front: the app shows a notification and a red dot instead.
+                    self.waitingProvider = provider
                     self.needsUser = true
                     self.log.info("needs user sign-in on \(self.webView.url?.host ?? "?")")
-                } else if state != .login, self.needsUser, !self.isOnGoogle {
+                } else if provider == nil, self.needsUser, !self.onProviderPage {
                     // Signed in; go back to being invisible.
                     self.needsUser = false
                     self.window.orderOut(nil)
@@ -102,7 +131,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         }
     }
 
-    /// On the same AWS host as `url` but no longer on its #fragment page (e.g. the portal's home).
+    /// On the same host as `url` but no longer on its #fragment page (e.g. the site's home).
     private func lostPage(of url: URL) -> Bool {
         guard let wanted = url.fragment, !wanted.isEmpty, let now = webView.url, !webView.isLoading,
               now.host == url.host else { return false }
@@ -113,27 +142,42 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        job = nil
         if needsUser {
             needsUser = false
             window.orderOut(nil)
         }
     }
 
-    /// Opens the browser on `url` so you can sign in to Google by hand.
-    func showSignIn(_ url: URL) {
+    /// Opens the browser on `url` so you can sign in by hand. The window closes by itself once
+    /// `finished` returns true for a loaded page; with nil you close it.
+    func showSignIn(_ url: URL, providers: [IdentityProvider], finished: ((URL) -> Bool)?) {
         stop()
-        manualSignIn = true
-        sawGoogle = false
+        signInProviders = providers
+        signInFinished = finished
+        sawProvider = false
         webView.load(URLRequest(url: url))
         present()
     }
+
+    private var signInProviders: [IdentityProvider] = []
 
     func clearSession() async {
         let store = WKWebsiteDataStore.default()
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
     }
 
-    private var isOnGoogle: Bool { webView.url?.host == "accounts.google.com" }
+    /// On a page of one of the job's providers (not counting the catch-all generic one).
+    private var onProviderPage: Bool {
+        guard let host = webView.url?.host else { return false }
+        let providers = job?.providers ?? signInProviders
+        return providers.contains { !$0.hosts.contains("*") && $0.matches(host: host) }
+    }
+
+    /// Shows the page the current flow is stuck on (e.g. a sign-in form).
+    func reveal() {
+        present()
+    }
 
     /// Logs what the page shows (and saves a snapshot next to the log) when a flow gives up on it.
     func logStuckPage() async {
@@ -152,52 +196,88 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         }
     }
 
-    /// Shows the page the current flow is stuck on (e.g. Google sign-in).
-    func reveal() {
-        present()
-    }
-
     private func present() {
         NSApp.activate(ignoringOtherApps: true)
         window.center()
         window.makeKeyAndOrderFront(nil)
     }
 
-    private func step() async -> PageState {
-        guard let result = try? await webView.evaluateJavaScript(Self.script) as? String else { return .wait }
-        if result.hasPrefix("clicked") {
-            log.info("\(result)")
-            return .clicked
-        }
-        return PageState(rawValue: result) ?? .wait
+    private func step(_ script: String) async -> PageState {
+        guard let result = try? await webView.evaluateJavaScript(script) as? String else { return .wait }
+        return Self.parse(result, log: log)
     }
 
-    /// Runs on every poll. Only clicks on Google's account picker and on AWS pages.
-    private static let script = #"""
-    (() => {
+    static func parse(_ result: String, log: AppLog? = nil) -> PageState {
+        if result.hasPrefix("clicked:") {
+            log?.info(result)
+            return .clicked
+        }
+        if result.hasPrefix("login:") { return .login(provider: String(result.dropFirst("login:".count))) }
+        return result == "done" ? .done : .wait
+    }
+
+    // MARK: Page script
+
+    /// The rules as JSON, handed to `pageScript`. Providers with real hosts come before the connector's
+    /// pages, catch-all ("*") ones after.
+    static func script(for job: BrowserJob) -> String {
+        var providers = job.providers
+        if !providers.contains(where: { $0.id == IdentityProvider.generic.id }) { providers.append(.generic) }
+        let specific = providers.filter { !$0.hosts.contains("*") }
+        let catchAll = providers.filter { $0.hosts.contains("*") }
+        struct Rules: Encodable {
+            let first: [IdentityProvider]
+            let approvals: [ApprovalRules]
+            let last: [IdentityProvider]
+            let serviceButtons: [String]
+        }
+        let rules = Rules(first: specific, approvals: job.approvals, last: catchAll,
+                          serviceButtons: providers.prefix(1).compactMap(\.serviceButton))
+        let json = (try? String(decoding: JSONEncoder().encode(rules), as: UTF8.self)) ?? "{}"
+        return "(\(pageScript))(\(json))"
+    }
+
+    /// Runs on every poll and returns "wait", "done", "login:<provider>" or "clicked:<label>".
+    /// Only clicks on provider pickers and on the connector's pages.
+    static let pageScript = #"""
+    (R) => {
       const visible = el => {
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
       };
+      const all = sel => { try { return [...document.querySelectorAll(sel)].filter(visible); } catch (e) { return []; } };
       const host = location.hostname;
-      if (host === 'accounts.google.com') {
-        if (document.querySelector('input[type=password]:not([aria-hidden=true]), input[type=email]')) return 'login';
-        const accounts = [...document.querySelectorAll('[data-identifier]')].filter(visible);
-        if (accounts.length === 1) { accounts[0].click(); return 'clicked:google-account'; }
-        if (accounts.length > 1) return 'login';
-        // Anything else that sits on Google (2-step prompt, passkey, "Verify it's you", consent) needs
-        // you too. Pass-through pages like the SAML post leave within a poll or two, before the streak counts.
-        return /\/o\/saml2\//.test(location.pathname) ? 'wait' : 'login';
+      const on = hosts => hosts.some(h => h === '*' || host === h || host.endsWith('.' + h));
+      const label = b => (b.innerText || b.value || '').trim();
+      const buttons = () => all('button, input[type=submit], [role=button], a[role=button]');
+
+      const provider = p => {
+        if (p.needsUser.some(s => all(s).length > 0)) return 'login:' + p.name;
+        for (const s of (p.pick || [])) {
+          const found = all(s);
+          if (found.length === 1) { found[0].click(); return 'clicked:' + p.name + ' account'; }
+          if (found.length > 1) return 'login:' + p.name;
+        }
+        const path = location.pathname;
+        if ((p.passThrough || []).some(re => new RegExp(re).test(path))) return 'wait';
+        return p.otherPagesNeedUser ? 'login:' + p.name : null;
+      };
+
+      for (const p of R.first) if (on(p.hosts)) return provider(p) || 'wait';
+
+      for (const a of R.approvals) {
+        if (!on(a.hosts)) continue;
+        const text = (document.body && document.body.innerText) || '';
+        if (a.done && new RegExp(a.done, 'i').test(text)) return 'done';
+        const wanted = [a.buttons, ...R.serviceButtons].map(re => new RegExp(re, 'i'));
+        const b = buttons().find(b => wanted.some(re => re.test(label(b))));
+        if (b) { const l = label(b); b.click(); return 'clicked:' + l; }
+        break;
       }
-      if (!/(\.|^)(amazonaws\.com|awsapps\.com|aws\.amazon\.com|signin\.aws)$/.test(host)) return 'wait';
-      const text = (document.body && document.body.innerText) || '';
-      if (/request approved|you can close this|access granted/i.test(text)) return 'done';
-      const wanted = /^(confirm and continue|allow access|allow|approve|confirm)$/i;
-      const buttons = [...document.querySelectorAll('button, input[type=submit], [role=button]')].filter(visible);
-      const b = buttons.find(b => wanted.test((b.innerText || b.value || '').trim()));
-      if (b) { b.click(); return 'clicked:' + (b.innerText || b.value).trim(); }
+
+      for (const p of R.last) if (on(p.hosts)) { const s = provider(p); if (s) return s; }
       return 'wait';
-    })()
+    }
     """#
 
     // MARK: WKNavigationDelegate – log the redirect chain for debugging.
@@ -210,13 +290,12 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         log.info("done \(Self.short(webView.url))")
         window.title = webView.title?.isEmpty == false ? webView.title! : "AWS AutoConnect – Sign in"
-        let host = webView.url?.host ?? ""
-        if host == "accounts.google.com" { sawGoogle = true }
-        if manualSignIn, host.hasSuffix(".awsapps.com"), webView.url?.path.hasPrefix("/start") == true {
-            // Either already signed in, or just came back from Google.
-            manualSignIn = false
-            log.info(sawGoogle ? "signed in to Google" : "already signed in")
-            onSignedIn?(sawGoogle)
+        if onProviderPage { sawProvider = true }
+        if let finished = signInFinished, let url = webView.url, finished(url) {
+            // Either already signed in, or just came back from the provider.
+            signInFinished = nil
+            log.info(sawProvider ? "signed in" : "already signed in")
+            onSignedIn?(sawProvider)
             Task { [window] in
                 try? await Task.sleep(for: .seconds(1.5))
                 window.orderOut(nil)

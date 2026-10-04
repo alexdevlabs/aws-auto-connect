@@ -49,10 +49,10 @@ final class StreamingProcess: @unchecked Sendable {
 
     var onLine: (@MainActor (String) -> Void)?
 
-    init(_ exe: String, _ args: [String]) {
+    init(_ exe: String, _ args: [String], environment: [String: String] = Shell.environment) {
         process.executableURL = URL(fileURLWithPath: exe)
         process.arguments = args
-        process.environment = Shell.environment
+        process.environment = environment
         process.standardOutput = pipe
         process.standardError = pipe
         process.standardInput = FileHandle.nullDevice

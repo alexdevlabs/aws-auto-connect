@@ -1,0 +1,83 @@
+import AppKit
+import Foundation
+import Observation
+
+/// A profile from the official AWS VPN Client (~/.config/AWSVPNClient/ConnectionProfiles).
+struct VPNProfile: Hashable, Identifiable {
+    let name: String
+    let configPath: String
+    var id: String { name }
+
+    static func all() -> [VPNProfile] {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/AWSVPNClient/ConnectionProfiles")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = json["ConnectionProfiles"] as? [[String: Any]] else { return [] }
+        return list.compactMap { p in
+            guard let name = p["ProfileName"] as? String, let path = p["OvpnConfigFilePath"] as? String else { return nil }
+            return VPNProfile(name: name, configPath: path)
+        }
+    }
+}
+
+/// The root-owned pieces installed by helper/install-helper.sh.
+enum VPNHelper {
+    static let dir = "/usr/local/libexec/aws-autoconnect"
+    static let helper = dir + "/vpn-helper"
+    static let openvpn = dir + "/openvpn"
+    static let etc = "/usr/local/etc/aws-autoconnect"
+    static let profile = etc + "/profile.ovpn"
+    static let sudoers = "/etc/sudoers.d/aws-autoconnect"
+    static let pidFile = "/var/run/aws-autoconnect/openvpn.pid"
+    static let logFile = "/var/log/aws-autoconnect.log"
+
+    static var isInstalled: Bool {
+        FileManager.default.isExecutableFile(atPath: helper) && FileManager.default.fileExists(atPath: sudoers)
+    }
+
+    static var installedProfileName: String? {
+        guard isInstalled else { return nil }
+        return (try? String(contentsOfFile: etc + "/profile.name", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// (host, port, proto) of the installed profile.
+    static func endpoint() throws -> (host: String, port: String, proto: String) {
+        let raw = (try? String(contentsOfFile: etc + "/endpoint", encoding: .utf8)) ?? ""
+        let parts = raw.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard parts.count == 3 else { throw AppError("VPN helper not installed – open Settings ▸ VPN") }
+        return (parts[0], parts[1], parts[2])
+    }
+
+    static var isTunnelRunning: Bool {
+        guard let raw = try? String(contentsOfFile: pidFile, encoding: .utf8),
+              let pid = pid_t(raw.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 else { return false }
+        // The tunnel runs as root, so EPERM still means "alive".
+        return kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    static func install(_ profile: VPNProfile) throws {
+        guard let res = Bundle.main.resourcePath else { throw AppError("Missing app resources") }
+        try runAsAdmin(script: res + "/install-helper.sh", args: [res, profile.configPath, profile.name, NSUserName()])
+    }
+
+    static func uninstall() throws {
+        guard let res = Bundle.main.resourcePath else { throw AppError("Missing app resources") }
+        try runAsAdmin(script: res + "/uninstall-helper.sh", args: [])
+    }
+
+    /// Shows the standard macOS admin password prompt and runs a bundled script as root.
+    private static func runAsAdmin(script: String, args: [String]) throws {
+        func quoted(_ s: String) -> String {
+            "quoted form of \"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        }
+        let command = ([quoted("/bin/bash"), quoted(script)] + args.map(quoted)).joined(separator: " & \" \" & ")
+        let source = "do shell script \(command) with administrator privileges"
+        var error: NSDictionary?
+        NSAppleScript(source: source)?.executeAndReturnError(&error)
+        if let error {
+            throw AppError(error[NSAppleScript.errorMessage] as? String ?? "Admin script failed")
+        }
+    }
+}

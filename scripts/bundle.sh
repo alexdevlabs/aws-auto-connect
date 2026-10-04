@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Builds "build/AWS AutoConnect.app" (ad-hoc signed).
+# SWIFT_BUILD_FLAGS adds flags to `swift build` (Homebrew passes --disable-sandbox).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 [ -x Resources/openvpn ] || scripts/build-openvpn.sh
 
-swift build -c release
-BIN_DIR="$(swift build -c release --show-bin-path)"
+# shellcheck disable=SC2086
+swift build -c release ${SWIFT_BUILD_FLAGS:-}
+# shellcheck disable=SC2086
+BIN_DIR="$(swift build -c release ${SWIFT_BUILD_FLAGS:-} --show-bin-path)"
 
 APP="$ROOT/build/AWS AutoConnect.app"
 rm -rf "$APP"

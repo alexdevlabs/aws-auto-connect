@@ -16,5 +16,11 @@ let package = Package(
             path: "Sources/DNSRelay",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "AWSAutoConnectTests",
+            dependencies: ["AWSAutoConnect"],
+            path: "Tests/AWSAutoConnectTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )
