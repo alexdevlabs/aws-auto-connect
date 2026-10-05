@@ -13,6 +13,8 @@ protocol Connector: AnyObject {
     static var displayName: String { get }
     /// Whether a fresh install starts with this connector turned on.
     static var enabledByDefault: Bool { get }
+    /// False when what it needs isn't on this Mac (e.g. a CLI); it's then hidden everywhere.
+    static var isAvailable: Bool { get }
 
     init(config: ConnectorConfig, context: ConnectorContext)
 
@@ -39,6 +41,7 @@ protocol Connector: AnyObject {
 }
 
 extension Connector {
+    static var isAvailable: Bool { true }
     var signInPage: SignInPage? { nil }
     func start() {}
     func stop() async {}

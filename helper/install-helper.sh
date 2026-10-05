@@ -40,6 +40,11 @@ echo "$host $port $proto" > "$ETC/endpoint"
 printf '%s\n' "$NAME" > "$ETC/profile.name"
 chown root:wheel "$ETC"/*
 chmod 644 "$ETC"/*
+# The profile can hold a client private key. Only root and you may read it (the app runs openvpn as
+# you to get the SAML challenge); it stays root-owned so you can't add directives root would run.
+chmod 600 "$ETC/profile.ovpn"
+chmod -N "$ETC/profile.ovpn"  # drop the entry from an earlier install
+chmod +a "$USERNAME allow read" "$ETC/profile.ovpn"
 
 tmp=$(mktemp)
 echo "$USERNAME ALL=(root) NOPASSWD: $DIR/vpn-helper" > "$tmp"

@@ -68,12 +68,14 @@ final class StreamingProcess: @unchecked Sendable {
             let data = h.availableData
             if !data.isEmpty { self?.ingest(data) }
         }
+        var launchError: Error?
         let status = await withCheckedContinuation { (cont: CheckedContinuation<Int32, Never>) in
             process.terminationHandler = { p in cont.resume(returning: p.terminationStatus) }
             do {
                 try process.run()
             } catch {
                 process.terminationHandler = nil
+                launchError = error
                 cont.resume(returning: -1)
                 return
             }
@@ -84,6 +86,12 @@ final class StreamingProcess: @unchecked Sendable {
             }
         }
         handle.readabilityHandler = nil
+        // Never started: our copy of the pipe's write end is still open, so reading to the end
+        // would wait forever.
+        if let launchError {
+            let name = process.executableURL?.path ?? "process"
+            return ProcResult(status: -1, output: "couldn't start \(name): \(launchError.localizedDescription)")
+        }
         if let rest = try? handle.readToEnd(), !rest.isEmpty { ingest(rest) }
         flushPartial()
 

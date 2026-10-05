@@ -149,18 +149,36 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         }
     }
 
-    /// Opens the browser on `url` so you can sign in by hand. The window closes by itself once
-    /// `finished` returns true for a loaded page; with nil you close it.
-    func showSignIn(_ url: URL, providers: [IdentityProvider], finished: ((URL) -> Bool)?) {
-        stop()
-        signInProviders = providers
-        signInFinished = finished
-        sawProvider = false
-        webView.load(URLRequest(url: url))
-        present()
+    /// Opens the browser on `url` so you can sign in by hand, once any flow using it is done; flows
+    /// that start meanwhile wait for you. Returns when `finished` is true for a loaded page (the window
+    /// then hides by itself) or you close the window.
+    func signInByHand(_ url: URL, providers: [IdentityProvider], finished: ((URL) -> Bool)?) async {
+        guard !manualQueued else { return }  // already waiting for its turn
+        manualQueued = true
+        defer { manualQueued = false }
+        await exclusive {
+            signInProviders = providers
+            signInFinished = finished
+            sawProvider = false
+            webView.load(URLRequest(url: url))
+            present()
+            await withCheckedContinuation { manualDone = $0 }
+            signInProviders = []
+            signInFinished = nil
+        }
+    }
+
+    /// The manual sign-in window is open.
+    var signingInByHand: Bool { manualDone != nil }
+
+    private func endSignInByHand() {
+        manualDone?.resume()
+        manualDone = nil
     }
 
     private var signInProviders: [IdentityProvider] = []
+    private var manualDone: CheckedContinuation<Void, Never>?
+    private var manualQueued = false
 
     func clearSession() async {
         let store = WKWebsiteDataStore.default()
@@ -296,9 +314,12 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
             signInFinished = nil
             log.info(sawProvider ? "signed in" : "already signed in")
             onSignedIn?(sawProvider)
-            Task { [window] in
+            endSignInByHand()
+            Task { [weak self] in
                 try? await Task.sleep(for: .seconds(1.5))
-                window.orderOut(nil)
+                // A flow that started meanwhile may have shown the window for you to sign in.
+                guard let self, !self.needsUser else { return }
+                self.window.orderOut(nil)
             }
         }
         guard ProcessInfo.processInfo.arguments.contains("--debug-browser") else { return }
@@ -353,6 +374,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        endSignInByHand()
         return false
     }
 }

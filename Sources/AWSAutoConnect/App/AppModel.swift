@@ -90,7 +90,7 @@ final class AppModel {
 
     private func rebuild() {
         var list: [any Connector] = []
-        for type in ConnectorRegistry.types {
+        for type in ConnectorRegistry.types where type.isAvailable {
             for config in store.configs where config.type == type.type && config.enabled {
                 if instances[config.id] == nil { instances[config.id] = type.init(config: config, context: context) }
                 list.append(instances[config.id]!)
@@ -138,16 +138,14 @@ final class AppModel {
     // MARK: Actions
 
     func showSignIn() {
-        if signInNeeded {
+        if signInNeeded || browser.signingInByHand {
             browser.reveal()
             return
         }
         let provider = providers.provider(id: Prefs.signInProvider)
-        if let page = connectors.lazy.compactMap(\.signInPage).first {
-            browser.showSignIn(page.url, providers: [provider], finished: page.finished)
-        } else {
-            browser.showSignIn(provider.signInURL ?? IdentityProvider.google.signInURL!, providers: [provider], finished: nil)
-        }
+        let page = connectors.lazy.compactMap(\.signInPage).first
+        let url = page?.url ?? provider.signInURL ?? IdentityProvider.google.signInURL!
+        Task { await browser.signInByHand(url, providers: [provider], finished: page?.finished) }
     }
 
     func post(_ title: String, _ body: String) {

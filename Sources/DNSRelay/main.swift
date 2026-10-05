@@ -170,6 +170,7 @@ func resolve(_ query: [UInt8], tcp: Bool, reply: ([UInt8]) -> Void) {
 }
 
 func usable(_ reply: [UInt8]) -> Bool {
+    guard reply.count >= 12 else { return false }  // shorter than a DNS header (e.g. a broken TCP reply)
     let rcode = reply[3] & 0x0f
     return rcode == 0 || rcode == 3  // NOERROR or NXDOMAIN; SERVFAIL/REFUSED fall back
 }
@@ -303,7 +304,9 @@ func exchangeTCP(_ query: [UInt8], server: String) -> [UInt8]? {
 
 func readMessage(_ fd: Int32) -> [UInt8]? {
     guard let head = readExactly(fd, 2) else { return nil }
-    return readExactly(fd, Int(head[0]) << 8 | Int(head[1]))
+    let n = Int(head[0]) << 8 | Int(head[1])
+    guard n >= 12 else { return nil }  // not even a DNS header
+    return readExactly(fd, n)
 }
 
 func readExactly(_ fd: Int32, _ n: Int) -> [UInt8]? {

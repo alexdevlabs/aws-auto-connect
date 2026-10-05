@@ -115,7 +115,10 @@ final class GrafanaConnector: Connector {
 
     // MARK: Check & sign in
 
-    private var gcx: String? { Shell.find("gcx") ?? Self.goBin }
+    private var gcx: String? { Self.gcxPath }
+    private static var gcxPath: String? { Shell.find("gcx") ?? goBin }
+    /// Only offered when gcx is installed.
+    static var isAvailable: Bool { gcxPath != nil }
 
     /// `go install` puts it in ~/go/bin, which isn't on a GUI app's PATH.
     private static var goBin: String? {

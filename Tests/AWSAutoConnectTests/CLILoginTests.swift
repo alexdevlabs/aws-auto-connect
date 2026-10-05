@@ -45,3 +45,30 @@ final class CLILoginTests: XCTestCase {
         XCTAssertEqual(urls, ["https://example.com/a", "https://example.com/b"])
     }
 }
+
+final class ShellTests: XCTestCase {
+    /// A command that can't start returns an error instead of waiting forever on its output pipe.
+    func testMissingExecutableReturns() async {
+        let r = await StreamingProcess("/nonexistent/tool", []).run(timeout: 5)
+        XCTAssertEqual(r.status, -1)
+        XCTAssertTrue(r.output.contains("couldn't start /nonexistent/tool"), r.output)
+    }
+}
+
+@MainActor
+final class BrowserTurnTests: XCTestCase {
+    /// Flows take turns: a second one starts only after the first is done.
+    func testExclusiveRunsOneAtATime() async {
+        let browser = HeadlessBrowser()
+        var events: [String] = []
+        async let first: Void = browser.exclusive {
+            events.append("first start")
+            try? await Task.sleep(for: .milliseconds(200))
+            events.append("first end")
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        await browser.exclusive { events.append("second") }
+        await first
+        XCTAssertEqual(events, ["first start", "first end", "second"])
+    }
+}

@@ -22,7 +22,8 @@ your user (`sudo -u`), not as root, so it can't be used to read root-only files.
 
 The installed profile keeps only plain client directives and inline certificates. Anything that can
 run code (`up`, `down`, `plugin`, `script-security`, …) is dropped. openvpn's `--up`/`--down` point
-only at the root-owned `dns.sh`.
+only at the root-owned `dns.sh`. It's root-owned and readable only by root and your user (an ACL),
+since a mutual-auth profile carries the client's private key.
 
 Anyone who can run commands as your user can start or stop the tunnel and change the DNS allowlist.
 They can't run other commands as root through the helper.

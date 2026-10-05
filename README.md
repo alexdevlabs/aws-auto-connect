@@ -1,4 +1,8 @@
-# AWS AutoConnect
+<p align="center">
+  <img src="Assets/AppIcon-1024.png" alt="AWS AutoConnect icon" width="128" height="128">
+</p>
+
+<h1 align="center">AWS AutoConnect</h1>
 
 Menu bar app that keeps your CLI logins fresh and your VPN connected, without clicking through browser
 pages: AWS SSO, AWS Client VPN (SAML), and Grafana's `gcx`. Sign-in goes through your identity provider
@@ -37,7 +41,8 @@ Needs macOS 14+, Xcode 16+ and Homebrew `openssl@3`.
    app's WebKit store.
 2. **VPN** tab ▸ pick the AWS VPN Client profile ▸ **Install Helper…** (asks for your admin password once).
 3. **Status** tab ▸ **Connect**.
-4. Optional: **General** ▸ **Connectors** ▸ turn on **Grafana (gcx)**, then set it up in its tab.
+4. Optional: **General** ▸ **Connectors** ▸ turn on **Grafana (gcx)**, then set it up in its tab. It
+   only shows up when `gcx` is installed (in `/opt/homebrew/bin`, `/usr/local/bin` or `~/go/bin`).
 
 ## Connectors
 

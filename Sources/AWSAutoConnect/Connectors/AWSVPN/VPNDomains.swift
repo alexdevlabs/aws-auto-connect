@@ -84,8 +84,29 @@ final class VPNDomains {
 
     private func push() { Task { await sync() } }
 
+    @ObservationIgnored private var syncing: Task<Void, Never>?
+    @ObservationIgnored private var syncAgain = false
+
     /// Sends the toggle and list to the relay, which reloads them within a second. Also run before connecting.
+    /// One send at a time, so an older list can't land after a newer one; changes made during a
+    /// send go out right after it.
     func sync() async {
+        if let syncing {
+            syncAgain = true
+            return await syncing.value
+        }
+        let task = Task {
+            repeat {
+                syncAgain = false
+                await send()
+            } while syncAgain
+            syncing = nil
+        }
+        syncing = task
+        await task.value
+    }
+
+    private func send() async {
         guard VPNHelper.isInstalled, Self.relayInstalled else { return }
         let text = (allowlistOn ? "on" : "off") + "\n" + allowlist.map { $0 + "\n" }.joined()
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("aws-autoconnect-allowlist-\(UUID().uuidString)")

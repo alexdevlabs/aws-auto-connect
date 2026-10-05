@@ -63,9 +63,10 @@ case "${1:-}" in
     [ $# -eq 2 ] || die "usage: dns-config <file>"
     [ -n "${SUDO_UID:-}" ] || die "run via sudo"
     install -d -o root -g wheel -m 755 "$RUN"
-    sudo -u "#$SUDO_UID" /bin/cat -- "$2" | head -c 200000 > "$RUN/dns-allowlist.tmp"
-    chmod 644 "$RUN/dns-allowlist.tmp"
-    mv -f "$RUN/dns-allowlist.tmp" "$RUN/dns-allowlist"
+    tmp=$(mktemp "$RUN/dns-allowlist.XXXXXX")
+    sudo -u "#$SUDO_UID" /bin/cat -- "$2" | head -c 200000 > "$tmp"
+    chmod 644 "$tmp"
+    mv -f "$tmp" "$RUN/dns-allowlist"
     ;;
   *)
     die "usage: connect|disconnect|status|dns-config"

@@ -28,7 +28,7 @@ struct GeneralSettings: View {
             Toggle("Notifications", isOn: $notifications)
 
             Section("Connectors") {
-                ForEach(ConnectorRegistry.types.map(ObjectIdentifier.init), id: \.self) { id in
+                ForEach(ConnectorRegistry.types.filter { $0.isAvailable }.map(ObjectIdentifier.init), id: \.self) { id in
                     let type = ConnectorRegistry.types.first { ObjectIdentifier($0) == id }!
                     Toggle(type.displayName, isOn: Binding(get: { model.isEnabled(type) },
                                                            set: { model.setEnabled(type, $0) }))

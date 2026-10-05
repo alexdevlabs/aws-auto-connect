@@ -25,6 +25,8 @@ final class AWSVPNConnector: TunnelConnector {
     private(set) var state: State = .disconnected
     /// Whether you asked to be connected; drives reconnects.
     private(set) var wantsConnection = false
+    /// The connect in progress; Disconnect cancels it.
+    @ObservationIgnored private var connecting: Task<Void, Never>?
     let domains: VPNDomains
 
     @ObservationIgnored private let context: ConnectorContext
@@ -116,7 +118,16 @@ final class AWSVPNConnector: TunnelConnector {
     // MARK: Connect
 
     func connect() async {
-        guard !isBusy else { return }
+        if let connecting { return await connecting.value }
+        let task = Task {
+            await runConnect()
+            connecting = nil
+        }
+        connecting = task
+        await task.value
+    }
+
+    private func runConnect() async {
         wantsConnection = true
         do {
             guard VPNHelper.isInstalled else { throw AppError("VPN helper not installed – open the VPN tab") }
@@ -140,6 +151,7 @@ final class AWSVPNConnector: TunnelConnector {
             // Wait for another connector using the browser first: the challenge below expires.
             let provider = context.provider(for: config)
             let (sid, saml) = try await browser.exclusive {
+                try Task.checkCancellation()
                 state = .connecting("requesting sign-in")
                 let (sid, url) = try await requestChallenge(ip: ip, port: ep.port, proto: ep.proto)
 
@@ -157,8 +169,14 @@ final class AWSVPNConnector: TunnelConnector {
                     server.fail(AppError("VPN sign-in timed out"))
                 }
                 defer { watchdog.cancel(); browser.stop() }
-                return (sid, try await server.response())
+                let saml = try await withTaskCancellationHandler {
+                    try await server.response()
+                } onCancel: {
+                    server.fail(CancellationError())
+                }
+                return (sid, saml)
             }
+            try Task.checkCancellation()
 
             state = .connecting("starting tunnel")
             await domains.sync()
@@ -168,9 +186,11 @@ final class AWSVPNConnector: TunnelConnector {
 
             let r = await Shell.run("/usr/bin/sudo", ["-n", VPNHelper.helper, "connect", ip, ep.port, ep.proto, auth.path], timeout: 30)
             guard r.status == 0 else { throw AppError("Helper failed: \(r.lastLine)") }
-            try await waitForTunnel()
+            try await waitForTunnel()  // Disconnect, which cancelled us, stops the tunnel after this
             state = .connected
             log.info("connected")
+        } catch is CancellationError {
+            log.info("connect cancelled")
         } catch {
             log.error("connect failed: \(error.localizedDescription)")
             state = .failed(error.localizedDescription)
@@ -179,6 +199,10 @@ final class AWSVPNConnector: TunnelConnector {
 
     func disconnect() async {
         wantsConnection = false
+        if let connecting {
+            connecting.cancel()
+            await connecting.value  // so the tunnel can't come up after the disconnect below
+        }
         if VPNHelper.isInstalled {
             _ = await Shell.run("/usr/bin/sudo", ["-n", VPNHelper.helper, "disconnect"], timeout: 15)
         }
