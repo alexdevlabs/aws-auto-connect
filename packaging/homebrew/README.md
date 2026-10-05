@@ -16,13 +16,17 @@ brew install --HEAD alexdevlabs/tap/aws-autoconnect   # main branch
 
 ## Releasing a version
 
-1. Tag and push: `git tag -s v1.0.0 -m v1.0.0 && git push origin v1.0.0`.
-2. Publish a GitHub release for the tag (the app's update check reads the latest release and links its
-   notes): `gh release create v1.0.0 --generate-notes`.
+In this order, so nobody is offered an update Homebrew can't install yet:
+
+1. Bump `CFBundleShortVersionString` in `Resources/Info.plist`, commit and push.
+2. Tag and push: `git tag -s vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
 3. Get the tarball's checksum:
-   `curl -fsSL https://github.com/alexdevlabs/aws-auto-connect/archive/refs/tags/v1.0.0.tar.gz | shasum -a 256`
-4. In the tap, update `url` (the tag) and `sha256`, then commit and push. Do this right after the
-   release: until the tap has it, the app's **Update** button reports that Homebrew doesn't have it yet.
-5. Check it: `brew install --build-from-source alexdevlabs/tap/aws-autoconnect && brew test aws-autoconnect`.
+   `curl -fsSL https://github.com/alexdevlabs/aws-auto-connect/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256`
+4. Update `url` and `sha256` here and in the tap's `Formula/aws-autoconnect.rb`, run
+   `brew audit --strict alexdevlabs/tap/aws-autoconnect`, then commit and push both.
+5. Check it: `brew upgrade aws-autoconnect` (or `brew install`) and `brew test aws-autoconnect`.
+6. Publish a GitHub release for the tag with generated notes (web UI, or
+   `gh release create vX.Y.Z --generate-notes`). The app's update check reads the latest release,
+   so this is what offers the update.
 
 Keep `CFBundleShortVersionString` in `Resources/Info.plist` in step with the tag.

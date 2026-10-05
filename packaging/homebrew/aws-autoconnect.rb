@@ -34,10 +34,10 @@ class AwsAutoconnect < Formula
 
   def caveats
     <<~EOS
-      Start it once; it copies itself to ~/Applications and runs from there:
+      Start it once; it copies itself to /Applications (or ~/Applications) and runs from there:
         open "#{opt_prefix}/AWS AutoConnect.app"
       After `brew upgrade`, the copy updates itself the next time it starts.
-      `brew uninstall` leaves ~/Applications/AWS AutoConnect.app; delete it by hand.
+      `brew uninstall` leaves that copy of AWS AutoConnect.app; delete it by hand.
 
       For the VPN, open the VPN tab and click "Install Helper…" (asks for your admin password once).
     EOS

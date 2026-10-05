@@ -23,8 +23,8 @@ brew install alexdevlabs/tap/aws-autoconnect
 open "$(brew --prefix aws-autoconnect)/AWS AutoConnect.app"
 ```
 
-On first start it copies itself to `~/Applications` and runs from there, so it's in Finder, Spotlight
-and Launchpad. After `brew upgrade` the copy updates itself the next time it starts.
+On first start it copies itself to `/Applications` (or `~/Applications` if you can't write there) and
+runs from there, so it's in Finder, Spotlight and Launchpad. After `brew upgrade` the copy updates itself the next time it starts.
 
 **Updates:** once a day the app checks GitHub for a newer release. The Status tab then shows **Update
 available** with **Notes** and **Update**. Update runs `brew update` and `brew upgrade aws-autoconnect`, restarts the app
@@ -35,8 +35,8 @@ install updates on their own while the VPN is off. Copies installed with `make i
 Or from a clone:
 
 ```bash
-make install   # builds patched openvpn (first time), the app, copies to ~/Applications
-open ~/Applications/"AWS AutoConnect.app"
+make install   # builds patched openvpn (first time), the app, copies to /Applications
+open /Applications/"AWS AutoConnect.app"
 ```
 
 Needs macOS 14+, Xcode 16+ and Homebrew `openssl@3`.

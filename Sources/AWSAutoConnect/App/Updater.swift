@@ -3,7 +3,7 @@ import Observation
 
 /// Checks GitHub for a newer release and, for Homebrew installs, updates with `brew upgrade`.
 /// After the upgrade it starts Homebrew's build, which quits this copy (closing the VPN), replaces it
-/// in ~/Applications and starts it again (see `AppInstaller`); the VPN then reconnects if it was up.
+/// in /Applications and starts it again (see `AppInstaller`); the VPN then reconnects if it was up.
 @MainActor
 @Observable
 final class Updater {

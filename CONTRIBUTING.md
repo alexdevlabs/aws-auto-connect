@@ -5,7 +5,7 @@ Thanks for helping. Bug reports, new sign-in providers and new connectors are al
 ## Build and test
 
 ```bash
-make install   # builds the patched openvpn (first time), the app, copies to ~/Applications
+make install   # builds the patched openvpn (first time), the app, copies to /Applications
 swift test     # unit tests, including the page rules run in WebKit
 ```
 
