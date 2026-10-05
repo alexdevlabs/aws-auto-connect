@@ -29,6 +29,10 @@ final class AWSVPNConnector: TunnelConnector {
     @ObservationIgnored private var connecting: Task<Void, Never>?
     /// The disconnect in progress; a Connect clicked meanwhile starts after it.
     @ObservationIgnored private var disconnecting: Task<Void, Never>?
+    /// Whether the root helper is installed. Kept here (not read from disk in views) so the panel
+    /// updates when it changes; refreshed every tick and after installing or uninstalling.
+    private(set) var helperInstalled = VPNHelper.isInstalled
+    private(set) var installingHelper = false
     let domains: VPNDomains
 
     @ObservationIgnored private let context: ConnectorContext
@@ -74,8 +78,9 @@ final class AWSVPNConnector: TunnelConnector {
     var isBusy: Bool { if case .connecting = state { return true } else { return false } }
 
     var status: ConnectorStatus {
+        if installingHelper { return .init(health: .busy, summary: "Installing helper…") }
         switch state {
-        case .disconnected where !VPNHelper.isInstalled:
+        case .disconnected where !helperInstalled:
             return .init(health: .idle, summary: Self.setup(hasProfiles: !VPNProfile.all().isEmpty).summary)
         case .disconnected: return .init(health: .idle, summary: "Disconnected")
         case .connecting(let step): return .init(health: .busy, summary: "Connecting – \(step)…")
@@ -89,9 +94,11 @@ final class AWSVPNConnector: TunnelConnector {
         if state == .connected || isBusy {
             return [ConnectorAction(title: "Disconnect") { [weak self] in await self?.disconnect() }]
         }
-        guard VPNHelper.isInstalled else {
+        guard helperInstalled else {
             let setup = Self.setup(hasProfiles: !VPNProfile.all().isEmpty)
-            return [ConnectorAction(title: setup.action, enabled: setup.enabled) { [weak self] in self?.installHelper() }]
+            return [ConnectorAction(title: setup.action, enabled: setup.enabled && !installingHelper) { [weak self] in
+                await self?.installFromStatus()
+            }]
         }
         return [ConnectorAction(title: "Connect") { [weak self] in await self?.connect() }]
     }
@@ -104,16 +111,39 @@ final class AWSVPNConnector: TunnelConnector {
     }
 
     /// Same as the VPN tab's Install Helper…, for the selected profile (or the first one).
-    private func installHelper() {
+    private func installFromStatus() async {
         let profiles = VPNProfile.all()
         guard let profile = profiles.first(where: { $0.name == profileName }) ?? profiles.first else { return }
-        profileName = profile.name
         do {
-            try VPNHelper.install(profile)
-            state = .disconnected
+            try await installHelper(profile)
+        } catch is CancellationError {
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    /// Installs the root helper for `profile` (admin password prompt).
+    func installHelper(_ profile: VPNProfile) async throws {
+        guard !installingHelper else { return }
+        installingHelper = true
+        defer { installingHelper = false; refreshHelper() }
+        try await VPNHelper.install(profile)
+        profileName = profile.name
+        if case .failed = state { state = .disconnected }
+        log.info("helper installed for \(profile.name)")
+    }
+
+    func uninstallHelper() async throws {
+        guard !installingHelper else { return }
+        installingHelper = true
+        defer { installingHelper = false; refreshHelper() }
+        try await VPNHelper.uninstall()
+        log.info("helper uninstalled")
+    }
+
+    private func refreshHelper() {
+        let now = VPNHelper.isInstalled
+        if now != helperInstalled { helperInstalled = now }
     }
 
     var settingsTabs: [SettingsTab] {
@@ -130,6 +160,7 @@ final class AWSVPNConnector: TunnelConnector {
     }
 
     func tick(afterWake: Bool) {
+        refreshHelper()
         domains.ingest()
         let dropped = checkTunnel()
         let shouldReconnect = reconnect && !context.isQuiet && wantsConnection && !isBusy

@@ -19,14 +19,16 @@ struct VPNSettings: View {
             Toggle("Reconnect if dropped or after wake", isOn: $connector.reconnect)
 
             Section {
-                LabeledContent("Helper", value: installed.map { "Installed · \($0)" } ?? "Not installed")
+                LabeledContent("Helper", value: connector.installingHelper ? "Working…"
+                               : installed.map { "Installed · \($0)" } ?? "Not installed")
                 HStack {
                     Button(installed == nil ? "Install Helper…" : "Reinstall…") { install() }
-                        .disabled(selectedProfile == nil)
+                        .disabled(selectedProfile == nil || connector.installingHelper)
                         .help(installed == nil ? "Install the helper for the selected profile" : "Reinstall the helper for the selected profile")
                     Spacer()
                     if installed != nil {
                         Button("Uninstall…", role: .destructive) { uninstall() }
+                            .disabled(connector.installingHelper)
                     }
                 }
             } header: {
@@ -55,21 +57,24 @@ struct VPNSettings: View {
 
     private func install() {
         guard let profile = selectedProfile else { return }
-        run { try VPNHelper.install(profile) }
+        run { try await connector.installHelper(profile) }
     }
 
     private func uninstall() {
-        run { try VPNHelper.uninstall() }
+        run { try await connector.uninstallHelper() }
     }
 
-    private func run(_ action: () throws -> Void) {
-        do {
-            try action()
-            error = nil
-        } catch let e {
-            error = e.localizedDescription
+    private func run(_ action: @escaping () async throws -> Void) {
+        Task {
+            do {
+                try await action()
+                error = nil
+            } catch is CancellationError {
+            } catch let e {
+                error = e.localizedDescription
+            }
+            installed = VPNHelper.installedProfileName
         }
-        installed = VPNHelper.installedProfileName
     }
 }
 

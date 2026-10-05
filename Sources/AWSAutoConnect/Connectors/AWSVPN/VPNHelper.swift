@@ -57,27 +57,31 @@ enum VPNHelper {
         return kill(pid, 0) == 0 || errno == EPERM
     }
 
-    static func install(_ profile: VPNProfile) throws {
+    static func install(_ profile: VPNProfile) async throws {
         guard let res = Bundle.main.resourcePath else { throw AppError("Missing app resources") }
-        try runAsAdmin(script: res + "/install-helper.sh", args: [res, profile.configPath, profile.name, NSUserName()])
+        try await runAsAdmin(script: res + "/install-helper.sh", args: [res, profile.configPath, profile.name, NSUserName()])
     }
 
-    static func uninstall() throws {
+    static func uninstall() async throws {
         guard let res = Bundle.main.resourcePath else { throw AppError("Missing app resources") }
-        try runAsAdmin(script: res + "/uninstall-helper.sh", args: [])
+        try await runAsAdmin(script: res + "/uninstall-helper.sh", args: [])
     }
 
-    /// Shows the standard macOS admin password prompt and runs a bundled script as root.
-    private static func runAsAdmin(script: String, args: [String]) throws {
+    /// Shows the standard macOS admin password prompt (naming this app) and runs a bundled script as
+    /// root. Cancelling the prompt throws `CancellationError`. NSAppleScript belongs on the main thread,
+    /// so the app waits a moment first to let the panel show that it's working.
+    @MainActor
+    private static func runAsAdmin(script: String, args: [String]) async throws {
         func quoted(_ s: String) -> String {
             "quoted form of \"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
         }
         let command = ([quoted("/bin/bash"), quoted(script)] + args.map(quoted)).joined(separator: " & \" \" & ")
         let source = "do shell script \(command) with administrator privileges"
+        try? await Task.sleep(for: .milliseconds(150))
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)
-        if let error {
-            throw AppError(error[NSAppleScript.errorMessage] as? String ?? "Admin script failed")
-        }
+        guard let error else { return }
+        if error[NSAppleScript.errorNumber] as? Int == -128 { throw CancellationError() }
+        throw AppError(error[NSAppleScript.errorMessage] as? String ?? "Admin script failed")
     }
 }
