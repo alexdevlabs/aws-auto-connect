@@ -16,7 +16,7 @@ pages: AWS SSO, AWS Client VPN (SAML), and Grafana's `gcx`. Sign-in goes through
 
 ## Install
 
-With Homebrew (builds from source; needs Xcode):
+With Homebrew (builds from source; needs the Xcode Command Line Tools: `xcode-select --install`):
 
 ```bash
 brew install alexdevlabs/tap/aws-autoconnect
@@ -39,7 +39,7 @@ make install   # builds patched openvpn (first time), the app, copies to /Applic
 open /Applications/"AWS AutoConnect.app"
 ```
 
-Needs macOS 14+, Xcode 16+ and Homebrew `openssl@3`.
+Needs macOS 14+, the Xcode Command Line Tools 16+ (Swift 6) and Homebrew `openssl@3`.
 
 ## First-time setup
 

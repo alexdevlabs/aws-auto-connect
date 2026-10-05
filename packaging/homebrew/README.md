@@ -1,7 +1,7 @@
 # Homebrew tap
 
 `aws-autoconnect.rb` is the formula for the `alexdevlabs/homebrew-tap` repository. It builds the app
-from source on the user's Mac (needs Xcode), so there's no Gatekeeper warning and no Developer ID
+from source on the user's Mac (needs only the Command Line Tools), so there's no Gatekeeper warning and no Developer ID
 signature is needed.
 
 ```bash

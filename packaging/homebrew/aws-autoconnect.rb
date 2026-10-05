@@ -9,7 +9,6 @@ class AwsAutoconnect < Formula
   head "https://github.com/alexdevlabs/aws-auto-connect.git", branch: "main"
 
   depends_on "openssl@3" => :build # linked statically into the bundled openvpn
-  depends_on xcode: ["16.0", :build]
   depends_on macos: :sonoma
 
   # The same pinned sources scripts/build-openvpn.sh would download (the build has no network).

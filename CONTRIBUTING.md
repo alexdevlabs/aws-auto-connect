@@ -9,7 +9,7 @@ make install   # builds the patched openvpn (first time), the app, copies to /Ap
 swift test     # unit tests, including the page rules run in WebKit
 ```
 
-Needs Xcode 16+ and Homebrew `openssl@3`. Logs: `~/Library/Logs/AWSAutoConnect.log`.
+Needs the Xcode Command Line Tools 16+ (Swift 6) and Homebrew `openssl@3`; `swift test` needs full Xcode 16+ (for XCTest). Logs: `~/Library/Logs/AWSAutoConnect.log`.
 
 Debug aids: `--show-panel --tab=<title>` opens the panel and saves a snapshot to `~/Library/Logs`;
 `--debug-browser` logs and snapshots every page the hidden browser loads. The hidden browser is
