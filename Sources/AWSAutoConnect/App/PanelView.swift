@@ -18,7 +18,7 @@ struct PanelView: View {
             .flatMap(\.settingsTabs)
         return [SettingsTab("Status", height: 0) { StatusSection(model: model) }]
             + connectorTabs
-            + [SettingsTab("General", height: 330) { GeneralSettings(model: model) }]
+            + [SettingsTab("General", height: 400) { GeneralSettings(model: model) }]
     }
 
     private var tabSelection: Binding<String> {
@@ -99,6 +99,7 @@ private struct StatusSection: View {
                         Button("Open") { model.showSignIn() }
                     }
                 }
+                UpdateRow(updater: model.updater)
                 if model.connectors.isEmpty {
                     Text("Nothing to keep connected. Turn on a connector in General.")
                         .font(.caption).foregroundStyle(.secondary).padding(.vertical, 8)
@@ -122,6 +123,42 @@ private struct StatusSection: View {
         case .busy: return .yellow
         case .attention: return .red
         case .idle: return .secondary
+        }
+    }
+}
+
+/// Shown while there's an update to offer, it's installing, or installing failed.
+private struct UpdateRow: View {
+    let updater: Updater
+
+    var body: some View {
+        if let release = updater.release {
+            StatusRow(icon: "arrow.down.circle.fill", tint: tint, title: title(release), detail: detail(release)) {
+                HStack(spacing: 6) {
+                    Button("Notes") { updater.openNotes() }
+                    if updater.homebrewApp != nil, !updater.isUpdating {
+                        Button(isFailed ? "Retry" : "Update") { Task { await updater.install(release) } }
+                    }
+                }
+            }
+        }
+    }
+
+    private var isFailed: Bool { if case .failed = updater.state { return true } else { return false } }
+    private var tint: Color { isFailed ? .red : updater.isUpdating ? .yellow : .accentColor }
+
+    private func title(_ r: Updater.Release) -> String {
+        updater.isUpdating ? "Updating to v\(r.version)" : "Update available: v\(r.version)"
+    }
+
+    private func detail(_ r: Updater.Release) -> String {
+        switch updater.state {
+        case .updating(_, let step): return step + "…"
+        case .failed(_, let message): return message
+        default:
+            return updater.homebrewApp != nil
+                ? "You have v\(Updater.current). The VPN reconnects after the restart."
+                : "You have v\(Updater.current). Update with \(updater.manualHint)."
         }
     }
 }

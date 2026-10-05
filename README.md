@@ -26,6 +26,12 @@ open "$(brew --prefix aws-autoconnect)/AWS AutoConnect.app"
 On first start it copies itself to `~/Applications` and runs from there, so it's in Finder, Spotlight
 and Launchpad. After `brew upgrade` the copy updates itself the next time it starts.
 
+**Updates:** once a day the app checks GitHub for a newer release. The Status tab then shows **Update
+available** with **Notes** and **Update**. Update runs `brew update` and `brew upgrade aws-autoconnect`, restarts the app
+and reconnects the VPN if it was up. **General** ▸ **Updates** can turn the check off, check now, or
+install updates on their own while the VPN is off. Copies installed with `make install` or
+`brew install --HEAD` only get the notice.
+
 Or from a clone:
 
 ```bash

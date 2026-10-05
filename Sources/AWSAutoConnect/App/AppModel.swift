@@ -12,6 +12,7 @@ final class AppModel {
     private(set) var connectors: [any Connector] = []
 
     @ObservationIgnored let browser = HeadlessBrowser()
+    @ObservationIgnored let updater = Updater()
     @ObservationIgnored let providers = ProviderRegistry()
     @ObservationIgnored let store: ConnectorStore
     @ObservationIgnored let context: ConnectorContext
@@ -30,6 +31,12 @@ final class AppModel {
             self?.connectors.contains { ($0 as? any TunnelConnector)?.isConnected == true } ?? false
         }
         context.showSignIn = { [weak self] in self?.showSignIn() }
+        updater.notify = { [weak self] title, body in self?.post(title, body) }
+        updater.tunnelUp = { [weak self] in self?.context.tunnelUp() ?? false }
+        updater.vpnConnected = { [weak self] in
+            guard let vpn = self?.connector(AWSVPNConnector.self) else { return false }
+            return vpn.isConnected || vpn.isBusy
+        }
         rebuild()
     }
 
@@ -64,6 +71,10 @@ final class AppModel {
         observe()
         tick()
         connectors.forEach { $0.start() }
+        if Updater.takeReconnectFlag(), let vpn = connector(AWSVPNConnector.self) {
+            log.info("reconnecting the VPN after the update")
+            Task { await vpn.connect() }
+        }
     }
 
     // MARK: Connectors
@@ -142,6 +153,7 @@ final class AppModel {
 
     func tick(afterWake: Bool = false) {
         for c in connectors { c.tick(afterWake: afterWake) }
+        updater.tick()
     }
 
     // MARK: Actions

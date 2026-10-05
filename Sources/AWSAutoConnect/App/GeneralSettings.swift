@@ -10,6 +10,8 @@ struct GeneralSettings: View {
     @AppStorage(Prefs.Key.quietFrom.rawValue) private var quietFrom = 19
     @AppStorage(Prefs.Key.quietTo.rawValue) private var quietTo = 8
     @AppStorage(Prefs.Key.quietWeekends.rawValue) private var quietWeekends = false
+    @AppStorage(Prefs.Key.checkForUpdates.rawValue) private var checkForUpdates = true
+    @AppStorage(Prefs.Key.autoInstallUpdates.rawValue) private var autoInstallUpdates = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var error: String?
 
@@ -48,12 +50,38 @@ struct GeneralSettings: View {
                 Text("No automatic refresh or reconnect.").font(.caption).foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle("Check daily", isOn: $checkForUpdates)
+                if model.updater.homebrewApp != nil {
+                    Toggle("Install automatically when the VPN is off", isOn: $autoInstallUpdates)
+                        .disabled(!checkForUpdates)
+                }
+                HStack {
+                    Text(updateStatus).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Check Now") { Task { await model.updater.check() } }
+                        .disabled(model.updater.state == .checking || model.updater.isUpdating)
+                }
+            } header: {
+                Text("Updates")
+            }
+
             if let error {
                 Text(error).foregroundStyle(.red).font(.caption)
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+    }
+
+    private var updateStatus: String {
+        switch model.updater.state {
+        case .idle: return "v\(Updater.current)"
+        case .checking: return "Checking…"
+        case .upToDate: return "v\(Updater.current) is the latest"
+        case .available(let r), .updating(let r, _): return "v\(r.version) is available"
+        case .failed(_, let message): return message
+        }
     }
 
     private var hours: some View {

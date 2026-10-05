@@ -46,6 +46,28 @@ enum AppInstaller {
         return install(from: source.resolvingSymlinksInPath()) && launchTarget()
     }
 
+    /// Homebrew's build, when this is the copy made from a release install of it (so `brew upgrade`
+    /// can update it). Not for `make install`/dragged copies or `--HEAD` installs. Worked out once.
+    static let homebrewSource: URL? = {
+        let running = Bundle.main.bundleURL.resolvingSymlinksInPath()
+        guard running.standardizedFileURL == target.standardizedFileURL,
+              let path = UserDefaults.standard.string(forKey: sourceKey),
+              FileManager.default.fileExists(atPath: path), !isHead(URL(fileURLWithPath: path)),
+              let mine = fingerprint(running), mine == UserDefaults.standard.string(forKey: copyKey)
+        else { return nil }
+        return URL(fileURLWithPath: path)
+    }()
+
+    /// `--HEAD` installs live in `Cellar/aws-autoconnect/HEAD-<sha>`.
+    static func isHead(_ optApp: URL) -> Bool {
+        optApp.resolvingSymlinksInPath().pathComponents.contains { $0.hasPrefix("HEAD") }
+    }
+
+    /// `CFBundleShortVersionString` of an app on disk (read fresh, not through Bundle's cache).
+    static func version(of app: URL) -> String? {
+        NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
+    }
+
     /// `<prefix>/Cellar/aws-autoconnect/<version>/AWS AutoConnect.app` → `<prefix>/opt/aws-autoconnect/AWS AutoConnect.app`.
     static func homebrewApp(for bundle: URL) -> URL? {
         let parts = bundle.pathComponents
@@ -89,21 +111,24 @@ enum AppInstaller {
         (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
     }
 
-    private static func launchTarget() -> Bool {
+    private static func launchTarget() -> Bool { launch(target) }
+
+    /// Starts a new instance of `app`; true if `open` succeeded. Blocks until `open` returns.
+    static func launch(_ app: URL) -> Bool {
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        open.arguments = ["-n", target.path]
+        open.arguments = ["-n", app.path]
         do {
             try open.run()
             open.waitUntilExit()
             return open.terminationStatus == 0
         } catch {
-            log.error("couldn't start \(target.path): \(error.localizedDescription)")
+            AppLog("install").error("couldn't start \(app.path): \(error.localizedDescription)")
             return false
         }
     }
 
-    private static func fingerprint(_ app: URL) -> String? {
+    static func fingerprint(_ app: URL) -> String? {
         guard let data = try? Data(contentsOf: app.appendingPathComponent("Contents/MacOS/AWSAutoConnect")) else { return nil }
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }

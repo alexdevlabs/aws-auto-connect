@@ -5,6 +5,7 @@ enum Prefs {
     enum Key: String {
         case notifications, signInProvider
         case quietEnabled, quietFrom, quietTo, quietWeekends
+        case checkForUpdates, autoInstallUpdates
     }
 
     private static var d: UserDefaults { .standard }
@@ -17,12 +18,18 @@ enum Prefs {
             Key.quietFrom.rawValue: 19,
             Key.quietTo.rawValue: 8,
             Key.quietWeekends.rawValue: false,
+            Key.checkForUpdates.rawValue: true,
+            Key.autoInstallUpdates.rawValue: false,
         ])
     }
 
     static var notifications: Bool { d.bool(forKey: Key.notifications.rawValue) }
     /// Default sign-in provider id for connectors that don't pick their own.
     static var signInProvider: String { d.string(forKey: Key.signInProvider.rawValue) ?? ProviderRegistry.defaultID }
+
+    static var checkForUpdates: Bool { d.bool(forKey: Key.checkForUpdates.rawValue) }
+    /// Install updates on their own while no tunnel is up (Homebrew installs only).
+    static var autoInstallUpdates: Bool { d.bool(forKey: Key.autoInstallUpdates.rawValue) }
 
     /// Quiet hours pause automatic refreshes and reconnects; manual actions still work.
     static func isQuiet(at date: Date = Date()) -> Bool {

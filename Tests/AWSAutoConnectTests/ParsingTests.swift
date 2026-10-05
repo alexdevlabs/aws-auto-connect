@@ -82,3 +82,43 @@ final class AppInstallerTests: XCTestCase {
         XCTAssertNil(AppInstaller.homebrewApp(for: URL(fileURLWithPath: "/opt/homebrew/Cellar/other/1.0/AWS AutoConnect.app")))
     }
 }
+
+@MainActor
+final class UpdaterTests: XCTestCase {
+    func testVersionComparison() {
+        XCTAssertTrue(Updater.isNewer("v1.10.0", than: "1.9.2"))
+        XCTAssertTrue(Updater.isNewer("1.0.1", than: "1.0"))
+        XCTAssertTrue(Updater.isNewer("2", than: "1.99.99"))
+        XCTAssertFalse(Updater.isNewer("v1.0.0", than: "1.0.0"))
+        XCTAssertFalse(Updater.isNewer("1.0", than: "1.0.0"))
+        XCTAssertFalse(Updater.isNewer("0.9.9", than: "1.0.0"))
+        XCTAssertTrue(Updater.isNewer("1.1.0-beta", than: "1.0.0"))
+    }
+
+    func testDecodesGitHubRelease() throws {
+        let json = #"{"tag_name":"v1.2.0","html_url":"https://github.com/alexdevlabs/aws-auto-connect/releases/tag/v1.2.0","name":"v1.2.0","draft":false}"#
+        let release = try JSONDecoder().decode(Updater.Release.self, from: Data(json.utf8))
+        XCTAssertEqual(release.version, "1.2.0")
+        XCTAssertEqual(release.htmlURL.lastPathComponent, "v1.2.0")
+    }
+}
+
+@MainActor
+final class UpdaterLinkTests: XCTestCase {
+    func testNotesOnlyOpenThisRepo() throws {
+        let decode = { (url: String) in
+            try JSONDecoder().decode(Updater.Release.self, from: Data(#"{"tag_name":"v2.0.0","html_url":"\#(url)"}"#.utf8))
+        }
+        let good = try decode("https://github.com/alexdevlabs/aws-auto-connect/releases/tag/v2.0.0")
+        XCTAssertEqual(Updater.notesURL(good), good.htmlURL)
+        let list = URL(string: "https://github.com/alexdevlabs/aws-auto-connect/releases")!
+        XCTAssertEqual(Updater.notesURL(try decode("file:///etc/passwd")), list)
+        XCTAssertEqual(Updater.notesURL(try decode("https://evil.example/alexdevlabs/aws-auto-connect/releases/x")), list)
+        XCTAssertEqual(Updater.notesURL(try decode("https://github.com/someone/else/releases/tag/v2")), list)
+    }
+
+    func testHeadInstallDetected() {
+        XCTAssertTrue(AppInstaller.isHead(URL(fileURLWithPath: "/opt/homebrew/Cellar/aws-autoconnect/HEAD-abc1234/AWS AutoConnect.app")))
+        XCTAssertFalse(AppInstaller.isHead(URL(fileURLWithPath: "/opt/homebrew/Cellar/aws-autoconnect/1.0.0/AWS AutoConnect.app")))
+    }
+}
