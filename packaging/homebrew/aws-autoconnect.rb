@@ -8,8 +8,8 @@ class AwsAutoconnect < Formula
   license "MIT"
   head "https://github.com/alexdevlabs/aws-auto-connect.git", branch: "main"
 
-  depends_on xcode: ["16.0", :build]
   depends_on "openssl@3" => :build # linked statically into the bundled openvpn
+  depends_on xcode: ["16.0", :build]
   depends_on macos: :sonoma
 
   # The same pinned sources scripts/build-openvpn.sh would download (the build has no network).
@@ -26,7 +26,7 @@ class AwsAutoconnect < Formula
   def install
     ENV["OPENVPN_TARBALL"] = resource("openvpn").cached_download.to_s
     ENV["AWS_PATCH_FILE"] = resource("aws-patch").cached_download.to_s
-    ENV["OPENSSL_PREFIX"] = Formula["openssl@3"].opt_prefix.to_s
+    ENV["OPENSSL_PREFIX"] = formula_opt_prefix("openssl@3").to_s
     ENV["SWIFT_BUILD_FLAGS"] = "--disable-sandbox"
     system "scripts/bundle.sh"
     prefix.install "build/AWS AutoConnect.app"
