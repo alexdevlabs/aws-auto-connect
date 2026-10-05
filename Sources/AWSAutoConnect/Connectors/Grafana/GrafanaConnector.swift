@@ -65,7 +65,9 @@ final class GrafanaConnector: Connector {
         set { config.set("onlyWithVPN", newValue) }
     }
 
-    var approvals: ApprovalRules {
+    var approvals: ApprovalRules { Self.approvalRules(stackHost: stackHost) }
+
+    nonisolated static func approvalRules(stackHost: String) -> ApprovalRules {
         let host = stackHost.trimmingCharacters(in: .whitespaces).lowercased()
         return ApprovalRules(
             hosts: ["grafana.net", "grafana.com"] + (host.isEmpty ? [] : [host]),

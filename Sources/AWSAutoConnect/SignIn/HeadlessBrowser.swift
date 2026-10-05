@@ -312,8 +312,11 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         if (!on(a.hosts)) continue;
         const text = (document.body && document.body.innerText) || '';
         if (a.done && new RegExp(a.done, 'i').test(text)) return 'done';
-        const wanted = [a.buttons, ...R.serviceButtons].map(re => new RegExp(re, 'i'));
-        const b = buttons().find(b => wanted.some(re => re.test(label(b))));
+        const services = R.serviceButtons.map(re => new RegExp(re, 'i'));
+        const wanted = [new RegExp(a.buttons, 'i'), ...services];
+        // "Sign in with Google" is often a plain link (Grafana's login page); approvals stay buttons only.
+        const b = buttons().find(b => wanted.some(re => re.test(label(b))))
+          || all('a[href]').find(l => services.some(re => re.test(label(l))));
         if (b) { const l = label(b); b.click(); return 'clicked:' + l; }
         break;
       }

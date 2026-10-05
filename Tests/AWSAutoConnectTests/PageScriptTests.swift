@@ -67,6 +67,23 @@ final class PageScriptTests: XCTestCase {
         XCTAssertEqual(r, "clicked:Sign in with Google")
     }
 
+    func testServiceLoginLinkForProvider() async throws {
+        // Grafana Cloud's login page, after the session expired: the provider buttons are links.
+        let html = """
+        <h1>Welcome to Grafana Cloud</h1>
+        <a href="login/google"><svg width="16" height="16"></svg><span>Sign in with Google</span></a>
+        <a href="login/grafana_com"><span>Sign in with Grafana.com</span></a>
+        """
+        let r = try await run(html, at: "https://myorg.grafana.net/login", approvals: [GrafanaConnector.approvalRules(stackHost: "")])
+        XCTAssertEqual(r, "clicked:Sign in with Google")
+    }
+
+    func testApprovalWordsOnPlainLinksAreNotClicked() async throws {
+        let html = "<a href=\"/elsewhere\">Continue</a><a href=\"/x\">OK</a>"
+        let r = try await run(html, at: "https://myorg.grafana.net/a/app", approvals: [GrafanaConnector.approvalRules(stackHost: "")])
+        XCTAssertEqual(r, "wait")
+    }
+
     func testCustomProviderRules() async throws {
         let okta = IdentityProvider(id: "okta", name: "Okta", hosts: ["okta.com"], signInURL: nil,
                                     needsUser: ["input[name=identifier]"], otherPagesNeedUser: false)
