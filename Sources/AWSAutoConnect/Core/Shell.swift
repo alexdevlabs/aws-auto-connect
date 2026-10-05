@@ -16,8 +16,81 @@ struct AppError: LocalizedError {
 }
 
 enum Shell {
-    /// GUI apps start with a minimal PATH, so look where Homebrew and the AWS installer put things.
-    static let searchPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    /// GUI apps start with a minimal PATH, so use the login shell's PATH (mise, asdf, pyenv, nix…
+    /// set it up there), then the places Homebrew, the AWS installer and version managers use.
+    /// Worked out once, in the background at launch (see `warmUp`).
+    static let searchPath = merge(loginShellPath(), fallbackPath)
+
+    static let fallbackPath: [String] = {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+                "\(home)/.local/share/mise/shims", "\(home)/.asdf/shims", "\(home)/.local/bin",
+                "\(home)/.nix-profile/bin", "/nix/var/nix/profiles/default/bin", "/run/current-system/sw/bin",
+                "/opt/local/bin"]
+    }()
+
+    /// Starts the login shell lookup so the first `find` doesn't wait for it.
+    static func warmUp() {
+        DispatchQueue.global(qos: .utility).async { _ = searchPath }
+    }
+
+    /// Absolute directories, first occurrence wins.
+    static func merge(_ lists: [String]...) -> String {
+        var seen = Set<String>()
+        return lists.joined().filter { $0.hasPrefix("/") && seen.insert($0).inserted }.joined(separator: ":")
+    }
+
+    static let pathMarker = "__AWS_AUTOCONNECT_PATH__"
+
+    /// The user's shell: $SHELL, else the account's login shell, else zsh.
+    static var userShell: String {
+        if let s = ProcessInfo.processInfo.environment["SHELL"], !s.isEmpty { return s }
+        if let pw = getpwuid(getuid()), let s = pw.pointee.pw_shell { return String(cString: s) }
+        return "/bin/zsh"
+    }
+
+    /// PATH as an interactive login shell sets it (`.zprofile` and `.zshrc`, where `mise activate`
+    /// usually goes). Empty if the shell fails, doesn't print it, or takes over 5 s.
+    static func loginShellPath() -> [String] {
+        parseShellPath(output(of: userShell, ["-ilc", "printf '\(pathMarker)%s\(pathMarker)' \"$PATH\""], timeout: 5))
+    }
+
+    /// stdout of a command, collected until it exits or `timeout` passes. Doesn't wait for the
+    /// pipe to close: rc files can start agents that inherit stdout and outlive the shell.
+    static func output(of exe: String, _ args: [String], timeout: TimeInterval) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        p.environment = ProcessInfo.processInfo.environment
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        let lock = NSLock()
+        var data = Data()
+        out.fileHandleForReading.readabilityHandler = { h in
+            let chunk = h.availableData
+            lock.withLock { data.append(chunk) }
+        }
+        let exited = DispatchSemaphore(value: 0)
+        p.terminationHandler = { _ in exited.signal() }
+        guard (try? p.run()) != nil else {
+            out.fileHandleForReading.readabilityHandler = nil
+            return ""
+        }
+        if exited.wait(timeout: .now() + timeout) == .timedOut { p.terminate() }
+        // Pick up anything written just before exit.
+        Thread.sleep(forTimeInterval: 0.05)
+        out.fileHandleForReading.readabilityHandler = nil
+        return lock.withLock { String(decoding: data, as: UTF8.self) }
+    }
+
+    /// The PATH between the markers; rc files may print other things around it.
+    static func parseShellPath(_ output: String) -> [String] {
+        let parts = output.components(separatedBy: pathMarker)
+        guard parts.count >= 3 else { return [] }
+        return parts[1].split(separator: ":").map(String.init)
+    }
 
     static func find(_ name: String) -> String? {
         for dir in searchPath.split(separator: ":") {

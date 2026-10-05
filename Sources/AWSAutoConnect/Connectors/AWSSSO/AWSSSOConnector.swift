@@ -139,7 +139,10 @@ final class AWSSSOConnector: Connector {
     }
 
     private func refresh(_ session: SSOSession) async throws {
-        guard let aws = Shell.find("aws") else { throw AppError("AWS CLI not found") }
+        guard let aws = Shell.find("aws") else {
+            log.error("aws not found in \(Shell.searchPath)")
+            throw AppError("AWS CLI not found")
+        }
         let before = SSOCache.token(for: session.name)?.expiresAt
 
         // The CLI refreshes the access token itself once it is close to expiring.

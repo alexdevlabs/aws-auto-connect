@@ -74,6 +74,44 @@ final class ParsingTests: XCTestCase {
     }
 }
 
+final class ShellPathTests: XCTestCase {
+    func testParsesPathBetweenMarkers() {
+        let m = Shell.pathMarker
+        let out = "Welcome!\n\(m)/Users/me/.local/share/mise/installs/aws-cli/2.17/bin:/usr/bin\(m)\nbye"
+        XCTAssertEqual(Shell.parseShellPath(out), ["/Users/me/.local/share/mise/installs/aws-cli/2.17/bin", "/usr/bin"])
+        XCTAssertEqual(Shell.parseShellPath("no markers"), [])
+        XCTAssertEqual(Shell.parseShellPath("\(m)/usr/bin"), [])
+    }
+
+    func testMergeKeepsOrderDropsDuplicatesAndRelative() {
+        XCTAssertEqual(Shell.merge(["/a", ".", "/b"], ["/b", "/c", ""]), "/a:/b:/c")
+        XCTAssertEqual(Shell.merge([], ["/usr/bin"]), "/usr/bin")
+    }
+
+    func testOutputDoesNotWaitForBackgroundChildren() {
+        // Like an rc file starting an agent that keeps stdout open after the shell exits.
+        let start = Date()
+        let out = Shell.output(of: "/bin/sh", ["-c", "sleep 30 & printf hello"], timeout: 5)
+        XCTAssertEqual(out, "hello")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+    }
+
+    func testOutputGivesUpOnAHangingShell() {
+        let start = Date()
+        XCTAssertEqual(Shell.output(of: "/bin/sh", ["-c", "printf partial; sleep 30"], timeout: 0.5), "partial")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+    }
+
+    func testLoginShellPathFindsSystemDirs() {
+        XCTAssertTrue(Shell.loginShellPath().contains("/usr/bin"))
+    }
+
+    func testFallbackCoversVersionManagers() {
+        XCTAssertTrue(Shell.fallbackPath.contains { $0.hasSuffix("/.local/share/mise/shims") })
+        XCTAssertTrue(Shell.fallbackPath.contains("/opt/homebrew/bin"))
+    }
+}
+
 final class AppInstallerTests: XCTestCase {
     func testHomebrewPath() {
         let cellar = URL(fileURLWithPath: "/opt/homebrew/Cellar/aws-autoconnect/1.0.0/AWS AutoConnect.app")
