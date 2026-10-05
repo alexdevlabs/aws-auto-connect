@@ -9,7 +9,7 @@
     <key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-    <string>local.aws-autoconnect</string>
+    <string>com.alexdevlabs.aws-autoconnect</string>
     <key>CFBundleExecutable</key>
     <string>AWSAutoConnect</string>
     <key>CFBundlePackageType</key>

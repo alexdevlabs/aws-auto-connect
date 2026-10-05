@@ -23,6 +23,15 @@ enum Prefs {
         ])
     }
 
+    /// Builds before 1.0 used the bundle ID `local.aws-autoconnect`; carry their settings over once.
+    static func migrateOldDomain() {
+        guard d.object(forKey: "migratedOldDomain") == nil else { return }
+        for (k, v) in d.persistentDomain(forName: "local.aws-autoconnect") ?? [:] where d.object(forKey: k) == nil {
+            d.set(v, forKey: k)
+        }
+        d.set(true, forKey: "migratedOldDomain")
+    }
+
     static var notifications: Bool { d.bool(forKey: Key.notifications.rawValue) }
     /// Default sign-in provider id for connectors that don't pick their own.
     static var signInProvider: String { d.string(forKey: Key.signInProvider.rawValue) ?? ProviderRegistry.defaultID }
