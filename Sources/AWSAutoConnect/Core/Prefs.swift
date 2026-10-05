@@ -24,9 +24,9 @@ enum Prefs {
     }
 
     /// Builds before 1.0 used the bundle ID `local.aws-autoconnect`; carry their settings over once.
-    static func migrateOldDomain() {
+    static func migrateOldDomain(into d: UserDefaults = .standard, from old: String = "local.aws-autoconnect") {
         guard d.object(forKey: "migratedOldDomain") == nil else { return }
-        for (k, v) in d.persistentDomain(forName: "local.aws-autoconnect") ?? [:] where d.object(forKey: k) == nil {
+        for (k, v) in d.persistentDomain(forName: old) ?? [:] where d.object(forKey: k) == nil {
             d.set(v, forKey: k)
         }
         d.set(true, forKey: "migratedOldDomain")

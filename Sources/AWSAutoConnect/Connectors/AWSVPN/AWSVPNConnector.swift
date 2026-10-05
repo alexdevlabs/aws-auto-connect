@@ -75,6 +75,8 @@ final class AWSVPNConnector: TunnelConnector {
 
     var status: ConnectorStatus {
         switch state {
+        case .disconnected where !VPNHelper.isInstalled:
+            return .init(health: .idle, summary: Self.setup(hasProfiles: !VPNProfile.all().isEmpty).summary)
         case .disconnected: return .init(health: .idle, summary: "Disconnected")
         case .connecting(let step): return .init(health: .busy, summary: "Connecting – \(step)…")
         case .connected:
@@ -87,7 +89,31 @@ final class AWSVPNConnector: TunnelConnector {
         if state == .connected || isBusy {
             return [ConnectorAction(title: "Disconnect") { [weak self] in await self?.disconnect() }]
         }
-        return [ConnectorAction(title: "Connect", enabled: VPNHelper.isInstalled) { [weak self] in await self?.connect() }]
+        guard VPNHelper.isInstalled else {
+            let setup = Self.setup(hasProfiles: !VPNProfile.all().isEmpty)
+            return [ConnectorAction(title: setup.action, enabled: setup.enabled) { [weak self] in self?.installHelper() }]
+        }
+        return [ConnectorAction(title: "Connect") { [weak self] in await self?.connect() }]
+    }
+
+    /// What the Status row says and offers while the helper isn't installed.
+    static func setup(hasProfiles: Bool) -> (summary: String, action: String, enabled: Bool) {
+        hasProfiles
+            ? ("Helper is not installed", "Install Helper…", true)
+            : ("Add a profile in AWS VPN Client first", "Install Helper…", false)
+    }
+
+    /// Same as the VPN tab's Install Helper…, for the selected profile (or the first one).
+    private func installHelper() {
+        let profiles = VPNProfile.all()
+        guard let profile = profiles.first(where: { $0.name == profileName }) ?? profiles.first else { return }
+        profileName = profile.name
+        do {
+            try VPNHelper.install(profile)
+            state = .disconnected
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
     }
 
     var settingsTabs: [SettingsTab] {

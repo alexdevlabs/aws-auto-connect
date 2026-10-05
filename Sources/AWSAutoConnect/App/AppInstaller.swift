@@ -14,8 +14,17 @@ enum AppInstaller {
     /// Where 1.0.0 put the copy, and still the fallback.
     static let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/\(name)")
     /// /Applications if you can write there without a password (admin accounts), else ~/Applications.
-    static let target = FileManager.default.isWritableFile(atPath: "/Applications")
-        ? URL(fileURLWithPath: "/Applications").appendingPathComponent(name) : home
+    static let target = target(applicationsWritable: FileManager.default.isWritableFile(atPath: "/Applications"))
+
+    static func target(applicationsWritable: Bool) -> URL {
+        applicationsWritable ? URL(fileURLWithPath: "/Applications").appendingPathComponent(name) : home
+    }
+
+    /// Whether `running` is the copy 1.0.0 made in ~/Applications and should move to `target`.
+    static func shouldMove(running: URL, fingerprint: String?, recorded: String?, target: URL = target) -> Bool {
+        target != home && running.standardizedFileURL == home.standardizedFileURL
+            && fingerprint != nil && fingerprint == recorded
+    }
 
     private static let log = AppLog("install")
     /// Homebrew's stable path to its build (`<prefix>/opt/aws-autoconnect/AWS AutoConnect.app`).
@@ -60,8 +69,7 @@ enum AppInstaller {
         }
 
         // The copy 1.0.0 made in ~/Applications, and /Applications is writable now.
-        if target != home, running.standardizedFileURL == home.standardizedFileURL,
-           let mine = fingerprint(running), mine == defaults.string(forKey: copyKey) {
+        if shouldMove(running: running, fingerprint: fingerprint(running), recorded: defaults.string(forKey: copyKey)) {
             log.info("moving to \(target.path)")
             if SMAppService.mainApp.status == .enabled {
                 // It points at this copy, which is about to go.

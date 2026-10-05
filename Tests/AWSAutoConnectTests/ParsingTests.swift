@@ -122,3 +122,54 @@ final class UpdaterLinkTests: XCTestCase {
         XCTAssertFalse(AppInstaller.isHead(URL(fileURLWithPath: "/opt/homebrew/Cellar/aws-autoconnect/1.0.0/AWS AutoConnect.app")))
     }
 }
+
+final class AppPlacementTests: XCTestCase {
+    private let apps = URL(fileURLWithPath: "/Applications/AWS AutoConnect.app")
+
+    func testTargetPrefersApplications() {
+        XCTAssertEqual(AppInstaller.target(applicationsWritable: true), apps)
+        XCTAssertEqual(AppInstaller.target(applicationsWritable: false), AppInstaller.home)
+    }
+
+    func testOnlyOurOldCopyMoves() {
+        let home = AppInstaller.home
+        XCTAssertTrue(AppInstaller.shouldMove(running: home, fingerprint: "a", recorded: "a", target: apps))
+        // make install / dragged copy: not the one we recorded.
+        XCTAssertFalse(AppInstaller.shouldMove(running: home, fingerprint: "a", recorded: "b", target: apps))
+        XCTAssertFalse(AppInstaller.shouldMove(running: home, fingerprint: nil, recorded: nil, target: apps))
+        // Already in /Applications, or ~/Applications is the place (no write access to /Applications).
+        XCTAssertFalse(AppInstaller.shouldMove(running: apps, fingerprint: "a", recorded: "a", target: apps))
+        XCTAssertFalse(AppInstaller.shouldMove(running: home, fingerprint: "a", recorded: "a", target: home))
+    }
+}
+
+final class PrefsMigrationTests: XCTestCase {
+    func testCopiesOldSettingsOnce() throws {
+        let new = "aac-test-new-\(UUID().uuidString)", old = "aac-test-old-\(UUID().uuidString)"
+        let d = try XCTUnwrap(UserDefaults(suiteName: new))
+        defer { d.removePersistentDomain(forName: new); d.removePersistentDomain(forName: old) }
+        d.setPersistentDomain(["vpnProfile": "Work", "signInProvider": "okta"], forName: old)
+        d.set("google", forKey: "signInProvider")  // already set here: kept
+
+        Prefs.migrateOldDomain(into: d, from: old)
+        XCTAssertEqual(d.string(forKey: "vpnProfile"), "Work")
+        XCTAssertEqual(d.string(forKey: "signInProvider"), "google")
+
+        d.removeObject(forKey: "vpnProfile")
+        Prefs.migrateOldDomain(into: d, from: old)  // second run does nothing
+        XCTAssertNil(d.string(forKey: "vpnProfile"))
+    }
+}
+
+@MainActor
+final class VPNSetupTests: XCTestCase {
+    func testOffersHelperInstall() {
+        let ready = AWSVPNConnector.setup(hasProfiles: true)
+        XCTAssertEqual(ready.summary, "Helper is not installed")
+        XCTAssertEqual(ready.action, "Install Helper…")
+        XCTAssertTrue(ready.enabled)
+        let none = AWSVPNConnector.setup(hasProfiles: false)
+        XCTAssertFalse(none.enabled)
+        XCTAssertEqual(none.summary, "Add a profile in AWS VPN Client first")
+    }
+}
