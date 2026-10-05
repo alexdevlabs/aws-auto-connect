@@ -61,6 +61,10 @@ struct GeneralSettings: View {
                     Spacer()
                     Button("Check Now") { Task { await model.updater.check() } }
                         .disabled(model.updater.state == .checking || model.updater.isUpdating)
+                    // Same as the Status tab's button, so you needn't go looking for it after Check Now.
+                    if let release = model.updater.release, model.updater.homebrewApp != nil, !model.updater.isUpdating {
+                        Button("Update") { Task { await model.updater.install(release) } }
+                    }
                 }
             } header: {
                 Text("Updates")
@@ -79,7 +83,8 @@ struct GeneralSettings: View {
         case .idle: return "v\(Updater.current)"
         case .checking: return "Checking…"
         case .upToDate: return "v\(Updater.current) is the latest"
-        case .available(let r), .updating(let r, _): return "v\(r.version) is available"
+        case .available(let r): return "v\(r.version) is available"
+        case .updating(let r, let step): return "Updating to v\(r.version): \(step)…"
         case .failed(_, let message): return message
         }
     }
