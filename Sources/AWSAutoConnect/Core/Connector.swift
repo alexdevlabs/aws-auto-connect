@@ -13,7 +13,7 @@ protocol Connector: AnyObject {
     static var displayName: String { get }
     /// Whether a fresh install starts with this connector turned on.
     static var enabledByDefault: Bool { get }
-    /// False when what it needs isn't on this Mac (e.g. a CLI); it's then hidden everywhere.
+    /// False when what it needs isn't on this Mac (e.g. a CLI); it's then hidden unless already turned on.
     static var isAvailable: Bool { get }
 
     init(config: ConnectorConfig, context: ConnectorContext)
@@ -36,6 +36,8 @@ protocol Connector: AnyObject {
     func start()
     /// Called when the app quits: close anything that shouldn't outlive it.
     func stop() async
+    /// True while `stop()` has work to do, so quitting waits for it.
+    var needsStop: Bool { get }
     /// Called every minute and shortly after the Mac wakes.
     func tick(afterWake: Bool)
 }
@@ -45,6 +47,7 @@ extension Connector {
     var signInPage: SignInPage? { nil }
     func start() {}
     func stop() async {}
+    var needsStop: Bool { false }
 }
 
 /// A connector that holds a tunnel; the app tells the others whether one is up.

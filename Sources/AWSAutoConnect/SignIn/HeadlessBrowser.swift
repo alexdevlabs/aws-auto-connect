@@ -44,7 +44,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
     private var sawProvider = false
     /// Connectors take turns: each one's `stop()` would cut off another's clicking.
     private var inUse = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var waiting: [(id: UUID, turn: CheckedContinuation<Void, Error>)] = []
 
     /// True while the window is up waiting for the user to sign in.
     private(set) var needsUser = false {
@@ -80,14 +80,32 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         window.delegate = self
     }
 
-    /// Runs `body` with the browser to itself, after any flow already using it finishes.
-    func exclusive<T>(_ body: () async throws -> T) async rethrows -> T {
-        if inUse { await withCheckedContinuation { waiting.append($0) } }
+    /// Runs `body` with the browser to itself, after any flow already using it finishes. Throws
+    /// `CancellationError` if the task is cancelled while it waits for its turn.
+    func exclusive<T>(_ body: () async throws -> T) async throws -> T {
+        if inUse {
+            let id = UUID()
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (turn: CheckedContinuation<Void, Error>) in
+                    if Task.isCancelled { return turn.resume(throwing: CancellationError()) }
+                    waiting.append((id, turn))
+                    // A minimised sign-in window would otherwise hold everyone up until it's closed.
+                    if signingInByHand, window.isMiniaturized { endSignInByHand(hide: true) }
+                }
+            } onCancel: {
+                Task { @MainActor [weak self] in self?.leaveQueue(id) }
+            }
+        }
         inUse = true
         defer {
-            if waiting.isEmpty { inUse = false } else { waiting.removeFirst().resume() }  // hand over directly
+            if waiting.isEmpty { inUse = false } else { waiting.removeFirst().turn.resume() }  // hand over directly
         }
         return try await body()
+    }
+
+    private func leaveQueue(_ id: UUID) {
+        guard let i = waiting.firstIndex(where: { $0.id == id }) else { return }  // already has its turn
+        waiting.remove(at: i).turn.resume(throwing: CancellationError())
     }
 
     /// Loads the job's URL out of sight and keeps clicking what it allows until `stop()`.
@@ -151,14 +169,19 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
 
     /// Opens the browser on `url` so you can sign in by hand, once any flow using it is done; flows
     /// that start meanwhile wait for you. Returns when `finished` is true for a loaded page (the window
-    /// then hides by itself) or you close the window.
+    /// then hides by itself), you close the window, or you minimise it while a flow is waiting.
+    /// Without `finished`, leaving the provider's pages (e.g. Google sending you on to your account)
+    /// counts as finished.
     func signInByHand(_ url: URL, providers: [IdentityProvider], finished: ((URL) -> Bool)?) async {
         guard !manualQueued else { return }  // already waiting for its turn
         manualQueued = true
         defer { manualQueued = false }
-        await exclusive {
+        let specific = providers.filter { !$0.hosts.contains("*") }
+        let offProvider = { (page: URL) in !specific.contains { $0.matches(host: page.host ?? "") } }
+        let startsOnProvider = !offProvider(url)
+        try? await exclusive {
             signInProviders = providers
-            signInFinished = finished
+            signInFinished = finished ?? (startsOnProvider ? offProvider : nil)
             sawProvider = false
             webView.load(URLRequest(url: url))
             present()
@@ -171,7 +194,8 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
     /// The manual sign-in window is open.
     var signingInByHand: Bool { manualDone != nil }
 
-    private func endSignInByHand() {
+    private func endSignInByHand(hide: Bool = false) {
+        if hide { window.orderOut(nil) }
         manualDone?.resume()
         manualDone = nil
     }
@@ -216,6 +240,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
 
     private func present() {
         NSApp.activate(ignoringOtherApps: true)
+        if window.isMiniaturized { window.deminiaturize(nil) }
         window.center()
         window.makeKeyAndOrderFront(nil)
     }
@@ -317,8 +342,8 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
             endSignInByHand()
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(1.5))
-                // A flow that started meanwhile may have shown the window for you to sign in.
-                guard let self, !self.needsUser else { return }
+                // A flow, or another "Sign in to …", that started meanwhile may have shown the window.
+                guard let self, !self.needsUser, !self.signingInByHand else { return }
                 self.window.orderOut(nil)
             }
         }
@@ -376,5 +401,9 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         sender.orderOut(nil)
         endSignInByHand()
         return false
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        if signingInByHand, !waiting.isEmpty { endSignInByHand(hide: true) }
     }
 }

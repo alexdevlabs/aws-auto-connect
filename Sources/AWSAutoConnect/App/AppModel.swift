@@ -72,6 +72,12 @@ final class AppModel {
         store.configs.contains { $0.type == type.type && $0.enabled }
     }
 
+    /// Connector types to show: available ones, plus any already turned on (so its settings and a
+    /// "not found" status stay reachable).
+    var offeredTypes: [any Connector.Type] {
+        ConnectorRegistry.types.filter { $0.isAvailable || isEnabled($0) }
+    }
+
     func setEnabled(_ type: any Connector.Type, _ on: Bool) {
         guard var config = store.configs.first(where: { $0.type == type.type }) else { return }
         config.enabled = on
@@ -90,7 +96,7 @@ final class AppModel {
 
     private func rebuild() {
         var list: [any Connector] = []
-        for type in ConnectorRegistry.types where type.isAvailable {
+        for type in offeredTypes {
             for config in store.configs where config.type == type.type && config.enabled {
                 if instances[config.id] == nil { instances[config.id] = type.init(config: config, context: context) }
                 list.append(instances[config.id]!)
@@ -98,6 +104,9 @@ final class AppModel {
         }
         connectors = list
     }
+
+    /// Whether quitting has to wait for `shutdown()`.
+    var needsShutdown: Bool { instances.values.contains { $0.needsStop } }
 
     /// Stops every connector (including ones turned off while running), e.g. closes the VPN.
     func shutdown() async {

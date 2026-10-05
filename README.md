@@ -42,7 +42,7 @@ Needs macOS 14+, Xcode 16+ and Homebrew `openssl@3`.
 2. **VPN** tab ▸ pick the AWS VPN Client profile ▸ **Install Helper…** (asks for your admin password once).
 3. **Status** tab ▸ **Connect**.
 4. Optional: **General** ▸ **Connectors** ▸ turn on **Grafana (gcx)**, then set it up in its tab. It
-   only shows up when `gcx` is installed (in `/opt/homebrew/bin`, `/usr/local/bin` or `~/go/bin`).
+   only shows up when `gcx` is installed (Homebrew, `~/go/bin`, `~/.local/bin`, or mise/asdf shims).
 
 ## Connectors
 

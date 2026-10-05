@@ -116,14 +116,23 @@ final class GrafanaConnector: Connector {
     // MARK: Check & sign in
 
     private var gcx: String? { Self.gcxPath }
-    private static var gcxPath: String? { Shell.find("gcx") ?? goBin }
-    /// Only offered when gcx is installed.
-    static var isAvailable: Bool { gcxPath != nil }
+    private static var gcxPath: String? { Shell.find("gcx") ?? userBin }
+    /// Only offered when gcx is installed (or the connector is already turned on). Looked up at most
+    /// every 30 s, since SwiftUI asks on every redraw.
+    static var isAvailable: Bool {
+        if let (found, at) = availability, at.timeIntervalSinceNow > -30 { return found }
+        let found = gcxPath != nil
+        availability = (found, Date())
+        return found
+    }
+    private static var availability: (Bool, Date)?
 
-    /// `go install` puts it in ~/go/bin, which isn't on a GUI app's PATH.
-    private static var goBin: String? {
-        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("go/bin/gcx").path
-        return FileManager.default.isExecutableFile(atPath: path) ? path : nil
+    /// `go install`, mise, asdf and friends put it in places that aren't on a GUI app's PATH.
+    private static var userBin: String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let dirs = ["\(home)/go/bin", "/usr/local/go/bin", "\(home)/.local/bin", "\(home)/bin",
+                    "\(home)/.local/share/mise/shims", "\(home)/.asdf/shims"]
+        return dirs.map { "\($0)/gcx" }.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     private var contextArgs: [String] {

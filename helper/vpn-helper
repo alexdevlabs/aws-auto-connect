@@ -26,6 +26,8 @@ stop() {
     for _ in $(seq 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
     kill -9 "$pid" 2>/dev/null || true
   fi
+  # A tunnel that was still starting may not have written its pidfile yet.
+  pkill -f "^$DIR/openvpn --config $ETC/profile.ovpn " 2>/dev/null || true
   # openvpn's down hook didn't get to run (crash, kill -9): restore DNS here.
   [ -f "$RUN/dns-relay.conf" ] && "$DIR/dns.sh" down
   rm -f "$PIDFILE" "$RUN/auth"
@@ -64,6 +66,7 @@ case "${1:-}" in
     [ -n "${SUDO_UID:-}" ] || die "run via sudo"
     install -d -o root -g wheel -m 755 "$RUN"
     tmp=$(mktemp "$RUN/dns-allowlist.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
     sudo -u "#$SUDO_UID" /bin/cat -- "$2" | head -c 200000 > "$tmp"
     chmod 644 "$tmp"
     mv -f "$tmp" "$RUN/dns-allowlist"

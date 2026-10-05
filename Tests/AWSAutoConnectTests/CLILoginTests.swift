@@ -58,17 +58,45 @@ final class ShellTests: XCTestCase {
 @MainActor
 final class BrowserTurnTests: XCTestCase {
     /// Flows take turns: a second one starts only after the first is done.
-    func testExclusiveRunsOneAtATime() async {
+    func testExclusiveRunsOneAtATime() async throws {
         let browser = HeadlessBrowser()
         var events: [String] = []
-        async let first: Void = browser.exclusive {
-            events.append("first start")
-            try? await Task.sleep(for: .milliseconds(200))
-            events.append("first end")
+        let (started, start) = AsyncStream<Void>.makeStream()
+        let first = Task {
+            try await browser.exclusive {
+                events.append("first start")
+                start.yield()
+                try? await Task.sleep(for: .milliseconds(200))
+                events.append("first end")
+            }
         }
-        try? await Task.sleep(for: .milliseconds(50))
-        await browser.exclusive { events.append("second") }
-        await first
+        for await _ in started { break }
+        try await browser.exclusive { events.append("second") }
+        try await first.value
         XCTAssertEqual(events, ["first start", "first end", "second"])
+    }
+
+    /// A flow cancelled while waiting for its turn gives up right away instead of waiting.
+    func testCancelledWaiterLeavesQueue() async throws {
+        let browser = HeadlessBrowser()
+        let (started, start) = AsyncStream<Void>.makeStream()
+        let (release, done) = AsyncStream<Void>.makeStream()
+        let holder = Task {
+            try await browser.exclusive {
+                start.yield()
+                for await _ in release { break }
+            }
+        }
+        for await _ in started { break }
+        let waiter = Task { try await browser.exclusive { "ran" } }
+        try await Task.sleep(for: .milliseconds(50))
+        waiter.cancel()
+        let result = await waiter.result
+        XCTAssertThrowsError(try result.get()) { XCTAssertTrue($0 is CancellationError) }
+        done.yield()
+        try await holder.value
+        // The lock is free again.
+        let after = try await browser.exclusive { "next" }
+        XCTAssertEqual(after, "next")
     }
 }

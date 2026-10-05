@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Quitting (menu, logout, `kill`, an update replacing the app) closes the VPN first.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if quitting { return .terminateLater }
-        guard VPNHelper.isTunnelRunning else { return .terminateNow }
+        guard model.needsShutdown || VPNHelper.isTunnelRunning else { return .terminateNow }
         quitting = true
         panel?.close()
         Task {

@@ -35,11 +35,12 @@ awk '
     tag = substr($0, 2, RLENGTH - 2); inblock = 1; print; next
   }
   $1 ~ /^(client|dev|dev-type|proto|nobind|persist-key|persist-tun|remote-cert-tls|cipher|data-ciphers|data-ciphers-fallback|auth|reneg-sec|resolv-retry|tls-client|tls-version-min|key-direction|verify-x509-name|tun-mtu|mssfix|verb)$/ { print }
-' "$PROFILE" > "$ETC/profile.ovpn"
+' "$PROFILE" | ( umask 077; cat > "$ETC/profile.ovpn.new" )  # the key is never readable by others
+mv -f "$ETC/profile.ovpn.new" "$ETC/profile.ovpn"
 echo "$host $port $proto" > "$ETC/endpoint"
 printf '%s\n' "$NAME" > "$ETC/profile.name"
 chown root:wheel "$ETC"/*
-chmod 644 "$ETC"/*
+chmod 644 "$ETC/endpoint" "$ETC/profile.name"
 # The profile can hold a client private key. Only root and you may read it (the app runs openvpn as
 # you to get the SAML challenge); it stays root-owned so you can't add directives root would run.
 chmod 600 "$ETC/profile.ovpn"

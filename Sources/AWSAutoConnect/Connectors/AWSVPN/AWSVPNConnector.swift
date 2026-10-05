@@ -27,6 +27,8 @@ final class AWSVPNConnector: TunnelConnector {
     private(set) var wantsConnection = false
     /// The connect in progress; Disconnect cancels it.
     @ObservationIgnored private var connecting: Task<Void, Never>?
+    /// The disconnect in progress; a Connect clicked meanwhile starts after it.
+    @ObservationIgnored private var disconnecting: Task<Void, Never>?
     let domains: VPNDomains
 
     @ObservationIgnored private let context: ConnectorContext
@@ -118,17 +120,16 @@ final class AWSVPNConnector: TunnelConnector {
     // MARK: Connect
 
     func connect() async {
-        if let connecting { return await connecting.value }
-        let task = Task {
-            await runConnect()
-            connecting = nil
-        }
+        if let disconnecting { await disconnecting.value }
+        if let connecting, !connecting.isCancelled { return await connecting.value }
+        wantsConnection = true
+        let task = Task { await runConnect() }
         connecting = task
         await task.value
+        if connecting == task { connecting = nil }
     }
 
     private func runConnect() async {
-        wantsConnection = true
         do {
             guard VPNHelper.isInstalled else { throw AppError("VPN helper not installed – open the VPN tab") }
             if VPNHelper.isTunnelRunning {
@@ -199,20 +200,29 @@ final class AWSVPNConnector: TunnelConnector {
 
     func disconnect() async {
         wantsConnection = false
-        if let connecting {
-            connecting.cancel()
-            await connecting.value  // so the tunnel can't come up after the disconnect below
+        if let disconnecting { return await disconnecting.value }
+        let task = Task {
+            if let connecting {
+                connecting.cancel()
+                await connecting.value  // so the tunnel can't come up after the disconnect below
+            }
+            if VPNHelper.isInstalled {
+                _ = await Shell.run("/usr/bin/sudo", ["-n", VPNHelper.helper, "disconnect"], timeout: 15)
+            }
+            state = .disconnected
         }
-        if VPNHelper.isInstalled {
-            _ = await Shell.run("/usr/bin/sudo", ["-n", VPNHelper.helper, "disconnect"], timeout: 15)
-        }
-        state = .disconnected
+        disconnecting = task
+        await task.value
+        if disconnecting == task { disconnecting = nil }
     }
 
-    /// The tunnel goes down with the app.
+    /// Whether quitting has to wait for `stop()`.
+    var needsStop: Bool { VPNHelper.isTunnelRunning || connecting != nil }
+
+    /// The tunnel goes down with the app, including one that's still coming up.
     func stop() async {
         wantsConnection = false
-        guard VPNHelper.isTunnelRunning else { return }
+        guard needsStop else { return }
         log.info("app quitting, disconnecting")
         await disconnect()
     }

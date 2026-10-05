@@ -28,8 +28,8 @@ struct GeneralSettings: View {
             Toggle("Notifications", isOn: $notifications)
 
             Section("Connectors") {
-                ForEach(ConnectorRegistry.types.filter { $0.isAvailable }.map(ObjectIdentifier.init), id: \.self) { id in
-                    let type = ConnectorRegistry.types.first { ObjectIdentifier($0) == id }!
+                ForEach(model.offeredTypes.map(ConnectorToggle.init)) { item in
+                    let type = item.type
                     Toggle(type.displayName, isOn: Binding(get: { model.isEnabled(type) },
                                                            set: { model.setEnabled(type, $0) }))
                 }
@@ -59,4 +59,11 @@ struct GeneralSettings: View {
     private var hours: some View {
         ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
     }
+}
+
+@MainActor
+private struct ConnectorToggle: Identifiable {
+    let type: any Connector.Type
+    let id: String
+    init(_ type: any Connector.Type) { self.type = type; id = type.type }
 }
