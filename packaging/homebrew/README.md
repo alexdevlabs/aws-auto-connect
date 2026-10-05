@@ -16,9 +16,9 @@ brew install --HEAD alexdevlabs/tap/aws-autoconnect   # main branch
 
 ## Releasing a version
 
-1. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
+1. Tag and push: `git tag v1.0.0 && git push origin v1.0.0`.
 2. Get the tarball's checksum:
-   `curl -fsSL https://github.com/alexdevlabs/aws-auto-connect/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256`
+   `curl -fsSL https://github.com/alexdevlabs/aws-auto-connect/archive/refs/tags/v1.0.0.tar.gz | shasum -a 256`
 3. In the tap, update `url` (the tag) and `sha256`, then commit and push.
 4. Check it: `brew install --build-from-source alexdevlabs/tap/aws-autoconnect && brew test aws-autoconnect`.
 
