@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="Assets/AppIcon-1024.png" alt="AWS AutoConnect icon" width="128" height="128">
-</p>
-
-<h1 align="center">AWS AutoConnect</h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Assets/banner-dark.png">
+  <img src="Assets/banner-light.png" alt="AWS Auto Connect: keeps your CLI logins fresh and your VPN connected">
+</picture>
 
 Menu bar app that keeps your CLI logins fresh and your VPN connected, without clicking through browser
 pages: AWS SSO, AWS Client VPN (SAML), and Grafana's `gcx`. Sign-in goes through your identity provider
