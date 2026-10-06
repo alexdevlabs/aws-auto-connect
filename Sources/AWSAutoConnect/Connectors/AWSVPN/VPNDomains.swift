@@ -76,6 +76,18 @@ final class VPNDomains {
         for e in learned where !isAllowed(e.name) { allow(e.name) }
     }
 
+    /// Like the row's "*.parent" choice, for every learned name not yet allowed.
+    func allowAllLearnedSubdomains() {
+        for d in Self.subdomainWildcards(for: learned.map(\.name).filter { !isAllowed($0) }) { allow(d) }
+    }
+
+    /// The parent of each name ("api.svc.corp.com" → "svc.corp.com"), or the name itself when the
+    /// parent would be too broad; without duplicates or entries another one already covers.
+    static func subdomainWildcards(for names: [String]) -> [String] {
+        let wanted = Set(names.map { parent(of: $0.lowercased()) ?? $0.lowercased() })
+        return wanted.filter { d in !wanted.contains { d.hasSuffix("." + $0) } }.sorted()
+    }
+
     /// "api.svc.corp.com" → "svc.corp.com"; nil when that would be too broad.
     static func parent(of name: String) -> String? {
         let labels = name.split(separator: ".")

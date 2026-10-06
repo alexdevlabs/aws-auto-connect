@@ -6,8 +6,12 @@ Thanks for helping. Bug reports, new sign-in providers and new connectors are al
 
 ```bash
 make install   # builds the patched openvpn (first time), the app, copies to /Applications
+make dev       # test build run from build/: orange menu bar mark and a DEV label (quits the running app)
 swift test     # unit tests, including the page rules run in WebKit
 ```
+
+`make dev` compiles with `-DDEV` in its own `.build/dev` folder, so the dev marks never reach a
+release build. It shares settings, sign-ins and the VPN helper with the installed app.
 
 Needs the Xcode Command Line Tools 16+ (Swift 6) and Homebrew `openssl@3`; `swift test` needs full Xcode 16+ (for XCTest). Logs: `~/Library/Logs/AWSAutoConnect.log`.
 

@@ -9,12 +9,18 @@ enum StatusIcon {
         case .busy: .systemYellow
         case .attention: .systemRed
         }
-        guard let dot else { return glyph() }
+        #if DEV
+        let mark = NSColor.systemOrange
+        #else
+        guard dot != nil else { return glyph() }
+        // labelColor resolves at draw time, so it follows the light/dark menu bar.
+        let mark = NSColor.labelColor
+        #endif
 
         let side: CGFloat = 18
         let image = NSImage(size: NSSize(width: side + 3, height: side), flipped: false) { rect in
-            // labelColor resolves at draw time, so it follows the light/dark menu bar.
-            drawGlyph(in: NSRect(x: 0, y: 0, width: side, height: side), color: .labelColor)
+            drawGlyph(in: NSRect(x: 0, y: 0, width: side, height: side), color: mark)
+            guard let dot else { return true }
 
             let d: CGFloat = 7
             let dotRect = NSRect(x: rect.width - d, y: 0.5, width: d, height: d)

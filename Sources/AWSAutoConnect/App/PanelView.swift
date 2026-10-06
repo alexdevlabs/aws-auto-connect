@@ -75,6 +75,13 @@ struct PanelView: View {
             HStack {
                 Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
                     .font(.caption).foregroundStyle(.secondary)
+                #if DEV
+                Text("DEV")
+                    .font(.caption2.weight(.medium)).foregroundStyle(.orange)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(.orange.opacity(0.15), in: Capsule())
+                    .help("Built with make dev")
+                #endif
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")

@@ -134,6 +134,9 @@ struct DNSSettings: View {
                     Spacer()
                     Menu {
                         Button("Allow All") { domains.allowAllLearned() }.disabled(domains.learned.isEmpty)
+                        Button("Allow All Subdomains") { domains.allowAllLearnedSubdomains() }
+                            .disabled(domains.learned.isEmpty)
+                            .help("Adds *.parent for each name, e.g. *.svc.corp.com for api.svc.corp.com")
                         Button("Scan Config Files") { scan() }
                             .disabled(scanning || !connector.isConnected || !VPNDomains.relayInstalled)
                         Divider()

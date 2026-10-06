@@ -56,6 +56,18 @@ final class ParsingTests: XCTestCase {
         XCTAssertNil(VPNDomains.parent(of: "corp.com"))
     }
 
+    @MainActor
+    func testSubdomainWildcards() {
+        let names = ["api.svc.corp.com", "web.svc.corp.com", "corp.com", "db.eu.internal.corp.com",
+                     "x.eu.internal.corp.com", "Grafana.Tools.Example.net"]
+        XCTAssertEqual(VPNDomains.subdomainWildcards(for: names),
+                       ["corp.com", "tools.example.net"])
+        // corp.com covers svc.corp.com and eu.internal.corp.com, so only the roots are left.
+        XCTAssertEqual(VPNDomains.subdomainWildcards(for: ["api.svc.corp.com", "db.eu.internal.corp.com"]),
+                       ["eu.internal.corp.com", "svc.corp.com"])
+        XCTAssertEqual(VPNDomains.subdomainWildcards(for: []), [])
+    }
+
     func testGrafanaCheck() {
         XCTAssertEqual(GrafanaConnector.classify(status: 0, output: "{}"), .ok)
         XCTAssertEqual(GrafanaConnector.classify(status: 1, output: "Error: request failed: 401 Unauthorized"), .signedOut)
@@ -109,6 +121,13 @@ final class ShellPathTests: XCTestCase {
     func testFallbackCoversVersionManagers() {
         XCTAssertTrue(Shell.fallbackPath.contains { $0.hasSuffix("/.local/share/mise/shims") })
         XCTAssertTrue(Shell.fallbackPath.contains("/opt/homebrew/bin"))
+    }
+}
+
+final class DevBuildTests: XCTestCase {
+    /// Only `make dev` passes -DDEV; normal and release builds (and so the tests) must not.
+    func testNormalBuildsAreNotDev() {
+        XCTAssertFalse(DevBuild.isDev)
     }
 }
 
