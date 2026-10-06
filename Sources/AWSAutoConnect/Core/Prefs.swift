@@ -6,6 +6,8 @@ enum Prefs {
         case notifications, signInProvider
         case quietEnabled, quietFrom, quietTo, quietWeekends
         case checkForUpdates, autoInstallUpdates
+        /// The last open Settings tab.
+        case settingsPage
     }
 
     private static var d: UserDefaults { .standard }

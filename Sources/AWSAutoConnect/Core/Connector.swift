@@ -3,7 +3,7 @@ import SwiftUI
 /// Something the app keeps signed in or connected: an AWS SSO session, an AWS Client VPN tunnel, a Grafana
 /// login. Each type lives in Connectors/<Name>/ and is listed in `ConnectorRegistry.types`.
 ///
-/// Connectors are @Observable classes; the app reads `status`, `actions` and `settingsTabs` from SwiftUI,
+/// Connectors are @Observable classes; the app reads `status`, `actions` and `settingsPages` from SwiftUI,
 /// so changes to their stored properties show up without extra plumbing.
 @MainActor
 protocol Connector: AnyObject {
@@ -19,15 +19,15 @@ protocol Connector: AnyObject {
     init(config: ConnectorConfig, context: ConnectorContext)
 
     var config: ConnectorConfig { get }
-    /// Status tab row title, e.g. "SSO".
+    /// Short name for the menu bar tooltip, e.g. "SSO".
     var title: String { get }
-    /// SF Symbol for the status row.
+    /// SF Symbol for the status row and the top of its Settings tab.
     var symbol: String { get }
     var status: ConnectorStatus { get }
-    /// Buttons on the status row, in order.
+    /// Buttons on the status row and its Settings page, in order.
     var actions: [ConnectorAction] { get }
-    /// Tabs this connector adds to the panel, between Status and General.
-    var settingsTabs: [SettingsTab] { get }
+    /// Tabs this connector adds to Settings, after General. The first one shows its status.
+    var settingsPages: [SettingsPage] { get }
     /// A page that goes through the sign-in provider and back (e.g. the AWS access portal), used by
     /// "Sign in to …" so the provider's cookies end up in the hidden browser. Nil if there's none.
     var signInPage: SignInPage? { get }
@@ -79,16 +79,23 @@ struct ConnectorAction: Identifiable {
     var id: String { title }
 }
 
-struct SettingsTab: Identifiable {
+/// A tab in the panel's Settings.
+struct SettingsPage: Identifiable {
+    /// Stable id, remembered as the last open tab and used by --show-panel=<id>.
+    let id: String
+    /// Short, as five tabs share the panel's width: "SSO", "VPN".
     let title: String
-    /// Fixed height of the tab's content in the panel.
+    /// Fixed height of the tab's content; the panel stays under its 560 pt limit.
     let height: CGFloat
+    /// Shown after the title, e.g. how many names are left to review.
+    var badge: String?
     let view: AnyView
-    var id: String { title }
 
-    init(_ title: String, height: CGFloat, @ViewBuilder _ view: () -> some View) {
+    init(_ id: String, title: String, height: CGFloat, badge: String? = nil, @ViewBuilder _ view: () -> some View) {
+        self.id = id
         self.title = title
         self.height = height
+        self.badge = badge
         self.view = AnyView(view())
     }
 }

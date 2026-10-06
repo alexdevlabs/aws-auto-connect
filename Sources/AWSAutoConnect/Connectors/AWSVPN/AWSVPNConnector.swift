@@ -146,10 +146,13 @@ final class AWSVPNConnector: TunnelConnector {
         if now != helperInstalled { helperInstalled = now }
     }
 
-    var settingsTabs: [SettingsTab] {
-        [
-            SettingsTab("VPN", height: 340) { VPNSettings(connector: self) },
-            SettingsTab("DNS", height: 420) { DNSSettings(connector: self) },
+    var settingsPages: [SettingsPage] {
+        let toReview = domains.learned.filter { !domains.isAllowed($0.name) }.count
+        return [
+            SettingsPage("vpn", title: title, height: 380) { VPNSettings(connector: self) },
+            SettingsPage("dns", title: "DNS", height: 440, badge: toReview > 0 ? "\(toReview)" : nil) {
+                DNSSettings(connector: self)
+            },
         ]
     }
 

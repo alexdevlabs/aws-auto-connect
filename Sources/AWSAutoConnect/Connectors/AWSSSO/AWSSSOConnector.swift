@@ -80,8 +80,8 @@ final class AWSSSOConnector: Connector {
         [ConnectorAction(title: "Refresh", enabled: state != .refreshing) { [weak self] in await self?.refresh() }]
     }
 
-    var settingsTabs: [SettingsTab] {
-        [SettingsTab("SSO", height: 360) { AWSSSOSettings(connector: self, context: context) }]
+    var settingsPages: [SettingsPage] {
+        [SettingsPage("sso", title: title, height: 425) { AWSSSOSettings(connector: self, context: context) }]
     }
 
     var signInPage: SignInPage? {

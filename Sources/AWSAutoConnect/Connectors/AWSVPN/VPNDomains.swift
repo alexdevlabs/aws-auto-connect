@@ -43,9 +43,13 @@ final class VPNDomains {
         var entries: [Entry]
     }
 
+    /// False for a test instance (one with its own `storeURL`), so tests never change the relay.
+    @ObservationIgnored private let sendsToRelay: Bool
+
     init(allowlistOn: Bool, allowlist: [String], storeURL: URL? = nil) {
         self.allowlistOn = allowlistOn
         self.allowlist = allowlist
+        sendsToRelay = storeURL == nil
         if let storeURL { self.storeURL = storeURL }
         if let data = try? Data(contentsOf: self.storeURL), let s = try? JSONDecoder().decode(Stored.self, from: data) {
             offset = s.offset
@@ -72,6 +76,17 @@ final class VPNDomains {
 
     func remove(_ domain: String) { allowlist.removeAll { $0 == domain } }
 
+    /// Stops allowing these names: takes out every entry that covers one of them, i.e. the name
+    /// itself or a parent domain (which also stops allowing that parent's other names).
+    func disallow(_ names: [String]) { allowlist = Self.allowlist(allowlist, without: names) }
+
+    static func allowlist(_ list: [String], without names: [String]) -> [String] {
+        let names = names.map { $0.lowercased() }
+        return list.filter { d in !names.contains { $0 == d || $0.hasSuffix("." + d) } }
+    }
+
+    func disallowAll() { allowlist = [] }
+
     func allowAllLearned() {
         for e in learned where !isAllowed(e.name) { allow(e.name) }
     }
@@ -93,6 +108,23 @@ final class VPNDomains {
         let labels = name.split(separator: ".")
         return labels.count >= 3 ? labels.dropFirst().joined(separator: ".") : nil
     }
+
+    /// The domain a learned name is listed under in Settings, whose "Allow" covers the whole group:
+    /// the last two labels ("api.svc.corp.com" → "corp.com"). Under a domain many companies share
+    /// (amazonaws.com, co.uk) that would be far too broad, so those group by their parent instead.
+    static func group(of name: String) -> String {
+        let labels = name.lowercased().split(separator: ".")
+        guard labels.count > 2 else { return name.lowercased() }
+        let base = labels.suffix(2).joined(separator: ".")
+        guard sharedDomains.contains(base) else { return base }
+        return labels.count > 3 ? labels.dropFirst().joined(separator: ".") : name.lowercased()
+    }
+
+    private static let sharedDomains: Set<String> = [
+        "amazonaws.com", "cloudfront.net", "azurewebsites.net", "cloudapp.net",
+        "googleapis.com", "appspot.com", "herokuapp.com",
+        "co.uk", "org.uk", "com.au", "co.jp", "co.nz", "com.br", "co.in",
+    ]
 
     private func push() { Task { await sync() } }
 
@@ -116,7 +148,7 @@ final class VPNDomains {
 
     private func send(_ text: String) async {
         sent = text
-        guard VPNHelper.isInstalled, Self.relayInstalled else { return }
+        guard sendsToRelay, VPNHelper.isInstalled, Self.relayInstalled else { return }
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("aws-autoconnect-allowlist-\(UUID().uuidString)")
         try? Data(text.utf8).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }

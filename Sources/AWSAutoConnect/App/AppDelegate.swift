@@ -17,16 +17,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         statusItem.button?.action = #selector(togglePanel)
 
         panel = DropdownPanel(rootView: PanelView(model: model))
+        installMainMenu()
+        // Esc in Settings goes back to the status; on the status it closes the panel.
+        panel.onEscape = { [weak self] in
+            guard let self, self.model.showingSettings else { return false }
+            self.model.closeSettings()
+            return true
+        }
 
         model.onChange = { [weak self] in self?.refreshIcon() }
         model.start()
         refreshIcon()
 
         UNUserNotificationCenter.current().delegate = self
-        if CommandLine.arguments.contains("--show-panel") {
+        // --show-panel[=<tab id>,…], e.g. --show-panel=status,dns: a snapshot of each (debug aid).
+        if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--show-panel") }) {
+            let pages = arg.split(separator: "=", maxSplits: 1).dropFirst().first?.split(separator: ",").map(String.init) ?? []
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 self.togglePanel()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.panel.saveSnapshot() }
+                for (i, page) in (pages.isEmpty ? ["status"] : pages).enumerated() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 * Double(i)) {
+                        if page == "status" { self.model.closeSettings() } else { self.model.openSettings(page) }
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 * Double(i) + 1) {
+                        self.panel.saveSnapshot(name: pages.isEmpty ? nil : page)
+                    }
+                }
             }
         }
     }
@@ -68,8 +84,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if panel.isVisible {
             panel.close()
         } else {
+            model.showingSettings = false
             panel.show(below: buttonWindow.convertToScreen(button.convert(button.bounds, to: nil)))
         }
+    }
+
+    /// Never shown (the app has no menu bar of its own), but it's what makes ⌘C/⌘V and Undo work in
+    /// the panel's text fields.
+    private func installMainMenu() {
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let main = NSMenu()
+        let item = NSMenuItem()
+        item.submenu = edit
+        main.addItem(item)
+        NSApp.mainMenu = main
     }
 
     private func refreshIcon() {
@@ -80,19 +115,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
 /// A floating panel placed under the menu bar icon when opened. Unlike NSPopover it isn't
 /// attached to the icon, so it stays put when a full-screen app hides the menu bar.
-/// Closes on a click outside or Esc.
+/// Closes on a click outside or Esc (which first goes back from Settings).
 final class DropdownPanel: NSPanel {
     /// Room around the visible panel for its SwiftUI-drawn shadow.
     private static let margin: CGFloat = 24
     private var monitors: [Any] = []
     private var hosting: NSHostingView<AnyView>!
     /// The window never resizes while open (a resize redraws one frame at the old origin, which makes
-    /// the header twitch). It is tall enough for the tallest tab; the panel is drawn at its top.
+    /// the header twitch). It is tall enough for any state; the panel is drawn at its top.
     private static let maxPanelHeight: CGFloat = 560
-    private var panelSize = CGSize(width: 340, height: 300)
+    private var panelSize = CGSize(width: 380, height: 300)
+    /// Esc first asks this; it returns true when it handled the key (e.g. went back from Settings).
+    var onEscape: (() -> Bool)?
 
     init<Content: View>(rootView: Content) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 340, height: 300),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 300),
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         isFloatingPanel = true
@@ -104,7 +141,7 @@ final class DropdownPanel: NSPanel {
         isReleasedWhenClosed = false
 
         // The window is clear and at least as tall as the panel; SwiftUI draws the rounded panel at
-        // the top and animates its height, so switching tabs never snaps or crops.
+        // the top and animates its height, so a state change never snaps or crops.
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         let chrome = rootView
             .fixedSize()
@@ -150,16 +187,19 @@ final class DropdownPanel: NSPanel {
             return event
         } as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { self?.close(); return nil }  // Esc
+            if event.keyCode == 53 {  // Esc
+                if self?.onEscape?() != true { self?.close() }
+                return nil
+            }
             return event
         } as Any)
     }
 
     /// Debug aid (--show-panel): writes what the panel drew to ~/Library/Logs.
-    func saveSnapshot() {
+    func saveSnapshot(name: String? = nil) {
         guard let view = contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
-        let url = AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("AWSAutoConnect-panel.png")
+        let url = AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("AWSAutoConnect-panel\(name.map { "-" + $0 } ?? "").png")
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 

@@ -1,25 +1,27 @@
 import AppKit
 
-/// The "Tunnel" mark (Assets/MenuBarIcon.svg) in the menu bar's text colour, with a small status dot.
+/// The "Tunnel" mark (Assets/MenuBarIcon.svg) in the menu bar's text colour. Quiet by default: dimmed
+/// when nothing is connected, plain when all is well, and a dot only while working or when it needs you.
 enum StatusIcon {
     static func image(for health: ConnectorStatus.Health) -> NSImage {
         let dot: NSColor? = switch health {
-        case .idle: nil
-        case .ok: .systemGreen
+        case .idle, .ok: nil
         case .busy: .systemYellow
         case .attention: .systemRed
         }
+        let alpha: CGFloat = health == .idle ? 0.45 : 1
         #if DEV
         let mark = NSColor.systemOrange
         #else
-        guard dot != nil else { return glyph() }
+        // A template image follows the light/dark menu bar; its alpha carries the dimming.
+        guard dot != nil else { return glyph(alpha: alpha) }
         // labelColor resolves at draw time, so it follows the light/dark menu bar.
         let mark = NSColor.labelColor
         #endif
 
         let side: CGFloat = 18
         let image = NSImage(size: NSSize(width: side + 3, height: side), flipped: false) { rect in
-            drawGlyph(in: NSRect(x: 0, y: 0, width: side, height: side), color: mark)
+            drawGlyph(in: NSRect(x: 0, y: 0, width: side, height: side), color: mark, alpha: alpha)
             guard let dot else { return true }
 
             let d: CGFloat = 7
@@ -31,23 +33,29 @@ enum StatusIcon {
             NSBezierPath(ovalIn: dotRect).fill()
             return true
         }
-        image.accessibilityDescription = "AWS AutoConnect"
+        image.accessibilityDescription = "AWS Auto Connect"
         return image
     }
 
-    /// The bare mark as a template image (menu bar when idle, panel header).
-    static func glyph(side: CGFloat = 18) -> NSImage {
+    /// The bare mark as a template image (menu bar without a dot).
+    static func glyph(side: CGFloat = 18, alpha: CGFloat = 1) -> NSImage {
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            drawGlyph(in: rect, color: .black)
+            drawGlyph(in: rect, color: .black, alpha: alpha)
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "AWS AutoConnect"
+        image.accessibilityDescription = "AWS Auto Connect"
         return image
     }
 
     /// Nested arches over a ground line, from the SVG's 0…100 box (y flipped for AppKit).
-    private static func drawGlyph(in rect: NSRect, color: NSColor) {
+    private static func drawGlyph(in rect: NSRect, color: NSColor, alpha: CGFloat) {
+        let cg = NSGraphicsContext.current?.cgContext
+        // One layer, so the dimming applies to the mark as a whole, not to each overlapping stroke.
+        cg?.saveGState()
+        cg?.setAlpha(alpha)
+        cg?.beginTransparencyLayer(auxiliaryInfo: nil)
+        defer { cg?.endTransparencyLayer(); cg?.restoreGState() }
         let s = rect.width / 100
         func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x * s, y: rect.minY + (100 - y) * s) }
         func arch(left: CGFloat, right: CGFloat, top: CGFloat, alpha: CGFloat) {

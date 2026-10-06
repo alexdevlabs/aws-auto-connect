@@ -68,6 +68,47 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(VPNDomains.subdomainWildcards(for: []), [])
     }
 
+    @MainActor
+    func testDisallow() {
+        let list = ["corp.example", "git.other.example", "vault.other.example"]
+        // A name allowed through its parent takes the parent out.
+        XCTAssertEqual(VPNDomains.allowlist(list, without: ["api.svc.corp.example"]), ["git.other.example", "vault.other.example"])
+        XCTAssertEqual(VPNDomains.allowlist(list, without: ["GIT.other.example", "nothing.example"]),
+                       ["corp.example", "vault.other.example"])
+    }
+
+    @MainActor
+    func testDomainGroups() {
+        XCTAssertEqual(VPNDomains.group(of: "grafana.tools.corp.example"), "corp.example")
+        XCTAssertEqual(VPNDomains.group(of: "Git.Corp.Example"), "corp.example")
+        XCTAssertEqual(VPNDomains.group(of: "corp.example"), "corp.example")
+        XCTAssertEqual(VPNDomains.group(of: "localhost"), "localhost")
+        // Shared domains group by the name's parent, never *.amazonaws.com or *.co.uk.
+        XCTAssertEqual(VPNDomains.group(of: "db.cluster-c1.eu-west-1.rds.amazonaws.com"),
+                       "cluster-c1.eu-west-1.rds.amazonaws.com")
+        XCTAssertEqual(VPNDomains.group(of: "api.corp.co.uk"), "corp.co.uk")
+        XCTAssertEqual(VPNDomains.group(of: "corp.co.uk"), "corp.co.uk")
+    }
+
+    func testStatusSummary() {
+        func row(_ short: String, _ health: ConnectorStatus.Health, _ summary: String, tunnel: Bool = false) -> StatusSummary.Row {
+            .init(name: "AWS \(short)", short: short, status: .init(health: health, summary: summary), isTunnel: tunnel)
+        }
+        let sso = row("SSO", .ok, "Valid · 2h left")
+        XCTAssertNil(StatusSummary.make([], signInProvider: nil))
+        XCTAssertEqual(StatusSummary.make([sso, row("VPN", .ok, "Connected", tunnel: true)], signInProvider: nil),
+                       .init(health: .ok, title: "All connected"))
+        XCTAssertEqual(StatusSummary.make([sso, row("VPN", .idle, "Disconnected", tunnel: true)], signInProvider: nil),
+                       .init(health: .idle, title: "VPN off"))
+        XCTAssertEqual(StatusSummary.make([sso, row("VPN", .busy, "Connecting…", tunnel: true)], signInProvider: nil),
+                       .init(health: .busy, title: "Connecting…"))
+        // Needs you beats working, and points at the connector's first action.
+        XCTAssertEqual(StatusSummary.make([row("SSO", .busy, "Refreshing…"), row("VPN", .attention, "Helper is not installed", tunnel: true)],
+                                          signInProvider: nil),
+                       .init(health: .attention, title: "Helper is not installed", detail: "AWS VPN", fix: .action(1)))
+        XCTAssertEqual(StatusSummary.make([sso], signInProvider: "Google")?.fix, .signIn)
+    }
+
     func testGrafanaCheck() {
         XCTAssertEqual(GrafanaConnector.classify(status: 0, output: "{}"), .ok)
         XCTAssertEqual(GrafanaConnector.classify(status: 1, output: "Error: request failed: 401 Unauthorized"), .signedOut)

@@ -15,7 +15,8 @@ release build. It shares settings, sign-ins and the VPN helper with the installe
 
 Needs the Xcode Command Line Tools 16+ (Swift 6) and Homebrew `openssl@3`; `swift test` needs full Xcode 16+ (for XCTest). Logs: `~/Library/Logs/AWSAutoConnect.log`.
 
-Debug aids: `--show-panel --tab=<title>` opens the panel and saves a snapshot to `~/Library/Logs`;
+Debug aids: `--show-panel` opens the panel and saves a snapshot to `~/Library/Logs`; `--show-panel=<tab>,…`
+(e.g. `status,dns`) saves one per Settings tab;
 `--debug-browser` logs and snapshots every page the hidden browser loads. The hidden browser is
 inspectable from Safari ▸ Develop.
 
@@ -26,22 +27,22 @@ Sources/AWSAutoConnect/
   Core/        Connector protocol, ConnectorStore (saved settings), Shell, Log, Prefs
   SignIn/      HeadlessBrowser (page rules engine), IdentityProvider, CLILogin, FormPostListener
   Connectors/  AWSSSO/, AWSVPN/ (+ DNS learning), Grafana/, ConnectorRegistry
-  App/         menu bar, panel, General settings
+  App/         menu bar, panel (status and Settings), General settings
 Sources/DNSRelay/   the root DNS relay used while the VPN is up
-helper/             root helper scripts (installed by the VPN tab)
+helper/             root helper scripts (installed from Settings ▸ AWS Client VPN)
 ```
 
 - A **sign-in provider** (Google, Okta, …) is data: which hosts its pages are on, which elements
   mean "needs you", what may be clicked, and which pages only pass through.
 - A **connector** (AWS SSO, AWS Client VPN, Grafana) is something kept signed in or connected. It
-  reports a status, offers actions, adds settings tabs, and is ticked every minute.
+  reports a status, offers actions, adds Settings tabs, and is ticked every minute.
 - The hidden browser knows neither. Each flow hands it a `BrowserJob`: the provider's rules plus the
   connector's `ApprovalRules` (the buttons it may click on its own pages).
 
 ## Adding a sign-in provider
 
 Most providers need no Swift. Save a JSON file in
-`~/Library/Application Support/AWSAutoConnect/providers/` (the SSO tab links to the folder):
+`~/Library/Application Support/AWSAutoConnect/providers/` (Settings ▸ SSO links to the folder):
 
 ```json
 {
@@ -79,7 +80,8 @@ what keeps it working.
 2. For CLI logins that print or open a URL (`<tool> login`), use `CLILogin`: it runs the command,
    catches the URL (from the output, or by standing in for `open` / `$BROWSER`), and lets the hidden
    browser click your `ApprovalRules`. See `GrafanaConnector` (~200 lines) for a complete example.
-3. Add a SwiftUI settings view and return it from `settingsTabs`.
+3. Add a SwiftUI settings view and return it from `settingsPages`, one per tab. The first tab gets
+   the connector's status and actions at the top.
 4. List the type in `ConnectorRegistry.types`. It appears in General ▸ Connectors.
 5. Add unit tests for any output parsing.
 

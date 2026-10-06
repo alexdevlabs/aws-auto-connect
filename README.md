@@ -9,8 +9,9 @@ pages: AWS SSO, AWS Client VPN (SAML), and Grafana's `gcx`. Sign-in goes through
 (Google by default) in a hidden browser that only shows itself when you really need to sign in.
 
 - Native Swift, ~5 MB, no runtime dependencies. Uses the system WebKit as the hidden browser.
-- Lives only in the menu bar: click the tunnel icon for status, actions and all settings. The dot is
-  green OK, yellow working, red needs you.
+- Lives only in the menu bar: click the tunnel icon for status and actions; **Settings** (⌘,) slides
+  in the rest, with a tab per connector. The icon is dimmed when nothing is connected and gets a dot only while
+  something is working (yellow) or needs you (red).
 - Pluggable: sign-in providers are JSON, connectors are small Swift adapters
   ([CONTRIBUTING.md](CONTRIBUTING.md)).
 
@@ -26,9 +27,9 @@ open "$(brew --prefix aws-autoconnect)/AWS AutoConnect.app"
 On first start it copies itself to `/Applications` (or `~/Applications` if you can't write there) and
 runs from there, so it's in Finder, Spotlight and Launchpad. After `brew upgrade` the copy updates itself the next time it starts.
 
-**Updates:** once a day the app checks GitHub for a newer release. The Status tab then shows **Update
-available** with **Notes** and **Update**. Update runs `brew update` and `brew upgrade aws-autoconnect`, restarts the app
-and reconnects the VPN if it was up. **General** ▸ **Updates** can turn the check off, check now, or
+**Updates:** once a day the app checks GitHub for a newer release. The panel then shows **v… is ready**
+with **Notes** and **Update**. Update runs `brew update` and `brew upgrade aws-autoconnect`, restarts the app
+and reconnects the VPN if it was up. **Settings** ▸ **General** ▸ **Updates** can turn the check off, check now, or
 install updates on their own while the VPN is off. Copies installed with `make install` or
 `brew install --HEAD` only get the notice.
 
@@ -43,11 +44,11 @@ Needs macOS 14+, the Xcode Command Line Tools 16+ (Swift 6) and Homebrew `openss
 
 ## First-time setup
 
-1. **SSO** tab ▸ **Browser**: pick your provider, then **Sign in to …** once. Cookies are kept in the
+1. **Settings** ▸ **SSO** ▸ **Browser**: pick your provider, then **Sign in to …** once. Cookies are kept in the
    app's WebKit store.
-2. **VPN** tab ▸ pick the AWS VPN Client profile ▸ **Install Helper…** (asks for your admin password once).
-3. **Status** tab ▸ **Connect**.
-4. Optional: **General** ▸ **Connectors** ▸ turn on **Grafana (gcx)**, then set it up in its tab. It
+2. **Settings** ▸ **VPN** ▸ pick the AWS VPN Client profile ▸ **Install Helper…** (asks for your admin password once).
+3. In the panel, **Connect** on the AWS Client VPN row.
+4. Optional: **Settings** ▸ **General** ▸ **Connectors** ▸ turn on **Grafana (gcx)**, then set it up on its page. It
    only shows up when `gcx` is installed (Homebrew, `~/go/bin`, `~/.local/bin`, or mise/asdf shims).
 
 ## Connectors
@@ -59,7 +60,7 @@ Needs macOS 14+, the Xcode Command Line Tools 16+ (Swift 6) and Homebrew `openss
 | **Grafana (gcx)** | the `gcx` CLI login | Every few minutes it runs `gcx api /api/user`. When that's rejected it runs `gcx auth login` and presses OK on Grafana's page. Can wait for the VPN if your stack is behind it. |
 
 Connectors are stored as a list (`ConnectorStore`), so several of a type are possible later. The panel
-shows the first enabled one of each.
+and Settings show the first enabled one of each.
 
 ## Sign-in providers
 
@@ -69,7 +70,7 @@ Keycloak, …) as JSON files in `~/Library/Application Support/AWSAutoConnect/pr
 [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-sign-in-provider).
 
 When the provider wants you (signed out, 2-step, passkey, "Verify it's you"), you get a notification,
-the dot turns red, and the Status tab shows **Sign-in needed** with an **Open** button. The flow waits up
+the dot turns red, and the panel shows **… wants you to sign in** with a **Sign In…** button. The flow waits up
 to 10 minutes, then carries on and the window hides again.
 
 ## How the VPN works
@@ -86,7 +87,8 @@ every lookup to the VPN's resolver and to your network's at the same time:
 - **Allowlist only on**: allowlisted domains (and their subdomains) use the VPN's resolver, everything
   else your network's.
 - Either way it records names that need the VPN: the VPN's resolver returned an address inside the
-  pushed routes, or only it knows the name. The **DNS** tab lists them (with Allow / Allow `*.parent`),
+  pushed routes, or only it knows the name. **Settings** ▸ **DNS** lists them grouped by domain: allow a name, its `*.parent` or the whole
+  group, and remove them again from **Allowed**. **Allowed** also takes hostnames you add yourself,
   and **Scan Config Files** looks up the hosts in `~/.ssh/config`, `~/.kube/config` and
   `~/.aws/config` while connected. Stored in `~/Library/Application Support/AWSAutoConnect/vpn-domains.json`;
   only names that needed the VPN, never other lookups.
@@ -111,8 +113,8 @@ statically.
 | `/var/run/aws-autoconnect/` | pid, relay config, allowlist, `dns-learned.log` (gone after reboot) |
 
 `vpn-helper` only accepts `connect <ipv4> <port> <udp|tcp> <file>`, `disconnect`, `status` and
-`dns-config <file>`, and reads the credentials and allowlist files as you, not as root. The VPN tab's
-**Uninstall Helper…** removes all of it. More in [SECURITY.md](SECURITY.md).
+`dns-config <file>`, and reads the credentials and allowlist files as you, not as root. The AWS Client VPN
+page's **Uninstall…** removes all of it. More in [SECURITY.md](SECURITY.md).
 
 ## Logs
 

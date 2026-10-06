@@ -1,7 +1,7 @@
 import ServiceManagement
 import SwiftUI
 
-// Settings sections shown inside the menu bar panel.
+// The General tab of Settings.
 
 struct GeneralSettings: View {
     let model: AppModel

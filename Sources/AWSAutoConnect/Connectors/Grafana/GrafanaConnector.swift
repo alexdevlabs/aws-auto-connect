@@ -79,7 +79,7 @@ final class GrafanaConnector: Connector {
     // MARK: Connector
 
     let title = "Grafana"
-    let symbol = "chart.xyaxis.line"
+    let symbol = "gauge.with.dots.needle.67percent"
 
     var status: ConnectorStatus {
         switch state {
@@ -99,8 +99,8 @@ final class GrafanaConnector: Connector {
         [ConnectorAction(title: "Sign In", enabled: state != .refreshing) { [weak self] in await self?.signIn() }]
     }
 
-    var settingsTabs: [SettingsTab] {
-        [SettingsTab("Grafana", height: 360) { GrafanaSettings(connector: self) }]
+    var settingsPages: [SettingsPage] {
+        [SettingsPage("grafana", title: title, height: 380) { GrafanaSettings(connector: self) }]
     }
 
     func tick(afterWake: Bool) {

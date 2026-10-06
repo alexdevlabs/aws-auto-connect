@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SwiftUI
 import UserNotifications
 
 /// Owns the browser and the connectors, and runs the schedule.
@@ -18,6 +19,8 @@ final class AppModel {
     @ObservationIgnored let context: ConnectorContext
     /// Called when the menu bar icon or tooltip may need redrawing.
     @ObservationIgnored var onChange: (() -> Void)?
+    /// The panel shows Settings instead of the status. Reset each time the panel opens.
+    var showingSettings = false
     @ObservationIgnored private var instances: [UUID: any Connector] = [:]
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private let log = AppLog("app")
@@ -130,6 +133,40 @@ final class AppModel {
     var health: ConnectorStatus.Health {
         if signInNeeded { return .attention }
         return connectors.map(\.status.health).max() ?? .idle
+    }
+
+    /// The panel's toast.
+    var summary: StatusSummary? {
+        let rows = connectors.map {
+            StatusSummary.Row(name: type(of: $0).displayName, short: $0.title, status: $0.status,
+                              isTunnel: $0 is any TunnelConnector)
+        }
+        return StatusSummary.make(rows, signInProvider: signInNeeded ? (browser.waitingProvider ?? "Your provider") : nil)
+    }
+
+    /// General, then each enabled connector's pages (first one of each type).
+    var settingsPages: [SettingsPage] {
+        var seen = Set<String>()
+        let connectorPages = connectors
+            .filter { seen.insert(type(of: $0).type).inserted }
+            .flatMap(\.settingsPages)
+        return [SettingsPage("general", title: "General", height: 440) { GeneralSettings(model: self) }]
+            + connectorPages
+    }
+
+    /// Slides the panel to Settings, on the tab with this id (nil: the last one).
+    func openSettings(_ page: String?) {
+        if let page { UserDefaults.standard.set(page, forKey: Prefs.Key.settingsPage.rawValue) }
+        withAnimation(.snappy(duration: 0.3)) { showingSettings = true }
+    }
+
+    func closeSettings() {
+        withAnimation(.snappy(duration: 0.3)) { showingSettings = false }
+    }
+
+    /// The connector whose first Settings page has this id.
+    func connector(forPage id: String) -> (any Connector)? {
+        connectors.first { $0.settingsPages.first?.id == id }
     }
 
     var tooltip: String {
