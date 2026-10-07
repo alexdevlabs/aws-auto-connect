@@ -1,11 +1,12 @@
 import AppKit
 
-/// The "Tunnel" mark (Assets/MenuBarIcon.svg) in the menu bar's text colour. Quiet by default: dimmed
-/// when nothing is connected, plain when all is well, and a dot only while working or when it needs you.
+/// The "Tunnel" mark (Assets/MenuBarIcon.svg) in the menu bar's text colour: dimmed
+/// when nothing is connected, a green dot when all is well, yellow while working, red when it needs you.
 enum StatusIcon {
     static func image(for health: ConnectorStatus.Health) -> NSImage {
         let dot: NSColor? = switch health {
-        case .idle, .ok: nil
+        case .idle: nil
+        case .ok: .systemGreen
         case .busy: .systemYellow
         case .attention: .systemRed
         }
