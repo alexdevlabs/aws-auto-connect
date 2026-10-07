@@ -36,6 +36,21 @@ enum VPNHelper {
         FileManager.default.isExecutableFile(atPath: helper) && FileManager.default.fileExists(atPath: sudoers)
     }
 
+    /// helper/helper-version, stamped into `dir` by the installer. Bump it whenever anything the
+    /// installer puts in place changes (the relay, dns.sh, vpn-helper), so installs ask to be updated.
+    static let versionFile = dir + "/version"
+    static var bundledVersion: String? { Bundle.main.path(forResource: "helper-version", ofType: nil).flatMap(readVersion) }
+
+    /// Installed, but from an older app: its files predate the ones this app ships.
+    static var isOutdated: Bool {
+        guard isInstalled, let bundled = bundledVersion else { return false }
+        return readVersion(versionFile) != bundled
+    }
+
+    private static func readVersion(_ path: String) -> String? {
+        (try? String(contentsOfFile: path, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static var installedProfileName: String? {
         guard isInstalled else { return nil }
         return (try? String(contentsOfFile: etc + "/profile.name", encoding: .utf8))?

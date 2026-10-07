@@ -79,16 +79,17 @@ AWS Client VPN is OpenVPN with a SAML extension.
 2. The hidden browser opens the URL; the provider posts `SAMLResponse` to `127.0.0.1:35001`, where the app listens.
 3. `sudo -n vpn-helper connect …` starts openvpn as root with `CRV1::<sid>::<SAMLResponse>`.
 
-**DNS**: while the tunnel is up, macOS uses `dns-relay` on 127.0.0.1 (root, from the helper). It sends
-every lookup to the VPN's resolver and to your network's at the same time:
-- **Allowlist only off** (default): answers come from the VPN's resolver, like the AWS client. Your
-  network's answer is only used if the VPN's resolver fails or takes over 1.5 s.
-- **Allowlist only on**: allowlisted domains (and their subdomains) use the VPN's resolver, everything
-  else your network's.
-- Either way it records names that need the VPN: the VPN's resolver returned an address inside the
-  pushed routes, or only it knows the name. **Settings** ▸ **DNS** lists them grouped by domain: allow a name, its `*.parent` or the whole
-  group, and remove them again from **Allowed**. **Allowed** also takes hostnames you add yourself,
-  and **Scan Config Files** looks up the hosts in `~/.ssh/config`, `~/.kube/config` and
+**DNS**: while the tunnel is up, macOS uses `dns-relay` on 127.0.0.1 (root, from the helper):
+- **Allowlist only off** (default): every lookup goes to the VPN's resolver and to your network's at
+  the same time. Answers come from the VPN's, like the AWS client; your network's is only used if the
+  VPN's fails or takes over 1.5 s.
+- **Allowlist only on**: allowlisted domains (and their subdomains) work the same way. Every other
+  name goes to your network's resolver only, and to the VPN's only when yours doesn't know the name
+  or fails, so the VPN's resolver doesn't see the rest.
+- Either way it records names that need the VPN: an answer points inside the pushed routes, or only
+  the VPN's resolver knows the name. **Settings** ▸ **DNS** lists them grouped by domain: allow a name, its `*.parent` or the whole
+  group, and remove them again from **Allowed**. **Allowed** also takes hostnames you add yourself
+  (one at a time, or all at once with **Edit as Text…**, which also copies out the list), and **Scan Config Files** looks up the hosts in `~/.ssh/config`, `~/.kube/config` and
   `~/.aws/config` while connected. Stored in `~/Library/Application Support/AWSAutoConnect/vpn-domains.json`;
   only names that needed the VPN, never other lookups.
 - `dns.sh watch` restarts the relay if it exits, puts DNS back when DHCP or a network switch

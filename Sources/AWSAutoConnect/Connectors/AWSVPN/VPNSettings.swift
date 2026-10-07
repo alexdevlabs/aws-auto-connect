@@ -21,8 +21,16 @@ struct VPNSettings: View {
             Section {
                 LabeledContent("Helper", value: connector.installingHelper ? "Working…"
                                : installed.map { "Installed · \($0)" } ?? "Not installed")
+                if connector.helperOutdated {
+                    Label {
+                        Text("This app comes with a newer helper. Update it, then reconnect to use it.")
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    }
+                    .font(.callout)
+                }
                 HStack {
-                    Button(installed == nil ? "Install Helper…" : "Reinstall…") { install() }
+                    Button(installed == nil ? "Install Helper…" : connector.helperOutdated ? "Update Helper…" : "Reinstall…") { install() }
                         .disabled(selectedProfile == nil || connector.installingHelper)
                         .help(installed == nil ? "Install the helper for the selected profile" : "Reinstall the helper for the selected profile")
                     Spacer()

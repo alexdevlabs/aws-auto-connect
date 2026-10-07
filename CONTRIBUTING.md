@@ -29,7 +29,7 @@ Sources/AWSAutoConnect/
   Connectors/  AWSSSO/, AWSVPN/ (+ DNS learning), Grafana/, ConnectorRegistry
   App/         menu bar, panel (status and Settings), General settings
 Sources/DNSRelay/   the root DNS relay used while the VPN is up
-helper/             root helper scripts (installed from Settings ▸ AWS Client VPN)
+helper/             root helper scripts (installed from Settings ▸ VPN)
 ```
 
 - A **sign-in provider** (Google, Okta, …) is data: which hosts its pages are on, which elements
@@ -90,6 +90,10 @@ what keeps it working.
 Anything that needs root goes through `helper/vpn-helper`, which only accepts a fixed set of
 commands. A new tunnel type adds its own named commands there, with the same care as the existing ones
 (validate every argument, read user files as the user). No general "run this as root".
+
+When you change anything the installer puts in place (`dns-relay`, `helper/`, the bundled openvpn),
+bump the number in `helper/helper-version`. The app compares it with the installed copy and offers
+**Update Helper…** until they match.
 
 ## Pull requests
 

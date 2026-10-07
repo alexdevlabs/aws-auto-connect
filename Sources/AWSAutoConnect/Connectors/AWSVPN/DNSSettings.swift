@@ -9,12 +9,22 @@ struct DNSSettings: View {
     @State private var expanded: Set<String> = []
     @State private var newHost = ""
     @FocusState private var addFocused: Bool
+    /// Edit as Text… swaps the tab for a text area.
+    @State private var editingText = false
 
     private enum Filter: String { case toReview, allowed }
 
     private var domains: VPNDomains { connector.domains }
 
     var body: some View {
+        if editingText {
+            AllowlistText(domains: domains) { editingText = false }
+        } else {
+            list
+        }
+    }
+
+    @ViewBuilder private var list: some View {
         @Bindable var domains = domains
         let toReview = domains.learned.filter { !domains.isAllowed($0.name) }.count
         let byHand = byHand
@@ -25,6 +35,13 @@ struct DNSSettings: View {
             if !VPNDomains.relayInstalled {
                 Text("Reinstall the helper (VPN tab) to turn this on.")
                     .font(.caption).foregroundStyle(.orange)
+            } else if connector.helperOutdated {
+                Label {
+                    Text("Update the helper (VPN tab): with Allowlist only on, the older one still sends every name to the VPN's DNS.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                .font(.callout)
             }
 
             Section {
@@ -32,9 +49,9 @@ struct DNSSettings: View {
             } footer: {
                 Text(domains.allowlistOn
                      ? (domains.allowlist.isEmpty
-                        ? "Nothing is allowed yet, so nothing uses the VPN's DNS."
-                        : "Only allowed domains and their subdomains use the VPN's DNS. Everything else uses your network's.")
-                     : "All lookups use the VPN's DNS, like the AWS client.")
+                        ? "Nothing allowed yet. Everything uses your normal DNS first."
+                        : "Allowed domains use the VPN's DNS. The rest use your normal DNS first.")
+                     : "Every lookup uses the VPN's DNS.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -87,6 +104,7 @@ struct DNSSettings: View {
                             filter = .allowed
                             addFocused = true
                         }
+                        Button("Edit as Text…") { editingText = true }
                         Button("Remove All Allowed", role: .destructive) { domains.disallowAll() }
                             .disabled(domains.allowlist.isEmpty)
                         Divider()
@@ -149,9 +167,7 @@ struct DNSSettings: View {
 
     /// The add field holds a hostname that isn't allowed yet.
     private var canAdd: Bool {
-        var d = newHost.trimmingCharacters(in: .whitespaces).lowercased()
-        if d.hasPrefix("*.") { d.removeFirst(2) }
-        return d.contains(".") && !domains.isAllowed(d)
+        VPNDomains.normalized(newHost).map { !domains.isAllowed($0) } ?? false
     }
 
     private func addHost() {
@@ -166,6 +182,50 @@ struct DNSSettings: View {
             await domains.scanConfigFiles()
             scanning = false
         }
+    }
+}
+
+/// Edit as Text…: the allowed list, one domain per line. Save replaces the list with what's there.
+private struct AllowlistText: View {
+    let domains: VPNDomains
+    let done: () -> Void
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(domains: VPNDomains, done: @escaping () -> Void) {
+        self.domains = domains
+        self.done = done
+        _text = State(initialValue: domains.allowlist.map { $0 + "\n" }.joined())
+    }
+
+    var body: some View {
+        let edited = VPNDomains.allowlist([], adding: VPNDomains.importable(text))
+        let added = edited.filter { !domains.allowlist.contains($0) }.count
+        let removed = domains.allowlist.filter { !edited.contains($0) }.count
+        VStack(alignment: .leading, spacing: 10) {
+            Text("One domain per line; each covers its subdomains. Paste to add, delete a line to remove, or copy it to share.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextEditor(text: $text)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+                .focused($focused)
+            HStack {
+                Text([added > 0 ? "+\(added)" : nil, removed > 0 ? "−\(removed)" : nil].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Spacer()
+                Button("Cancel", action: done).keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    domains.replaceAllowlist(with: edited)
+                    done()
+                }
+                .buttonStyle(.borderedProminent).disabled(added == 0 && removed == 0)
+            }
+        }
+        .padding(20)
+        .onAppear { focused = true }
     }
 }
 

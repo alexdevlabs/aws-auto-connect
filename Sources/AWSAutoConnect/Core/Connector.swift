@@ -26,6 +26,8 @@ protocol Connector: AnyObject {
     var status: ConnectorStatus { get }
     /// Buttons on the status row and its Settings page, in order.
     var actions: [ConnectorAction] { get }
+    /// Something to do that isn't urgent (e.g. "Helper update available"), offered in the toast.
+    var notice: (title: String, action: ConnectorAction)? { get }
     /// Tabs this connector adds to Settings, after General. The first one shows its status.
     var settingsPages: [SettingsPage] { get }
     /// A page that goes through the sign-in provider and back (e.g. the AWS access portal), used by
@@ -45,6 +47,7 @@ protocol Connector: AnyObject {
 extension Connector {
     static var isAvailable: Bool { true }
     var signInPage: SignInPage? { nil }
+    var notice: (title: String, action: ConnectorAction)? { nil }
     func start() {}
     func stop() async {}
     var needsStop: Bool { false }

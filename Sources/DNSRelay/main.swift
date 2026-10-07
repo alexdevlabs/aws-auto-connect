@@ -3,8 +3,9 @@
 // Each lookup goes to the VPN's resolver and to your network's resolver at the same time.
 // - Allowlist off: answers come from the VPN resolver (like the AWS client); your network's answer
 //   is only used when the VPN resolver fails or is slow.
-// - Allowlist on: allowlisted names (and reverse lookups of VPN addresses) use the VPN resolver,
-//   everything else your network's. The other one is the fallback.
+// - Allowlist on: allowlisted names (and reverse lookups of VPN addresses) are asked of both, and
+//   use the VPN resolver's answer. Everything else goes to your network's resolver only, and to the
+//   VPN's only when yours doesn't know the name or fails, so the VPN never sees the rest.
 // Either way, names that need the VPN are appended to dns-learned.log for the app:
 // the VPN resolver returns an address inside the VPN routes, or only the VPN resolver knows the name.
 //
@@ -41,6 +42,8 @@ let allowPath = runDir + "/dns-allowlist"
 let learnedPath = runDir + "/dns-learned.log"
 /// DNS_RELAY_PORT overrides the port, for testing without root.
 let listenPort = getenv("DNS_RELAY_PORT").flatMap { UInt16(String(cString: $0)) } ?? 53
+/// DNS_RELAY_SERVER_PORT overrides the resolvers' port, for testing against a fake one.
+let serverPort = getenv("DNS_RELAY_SERVER_PORT").flatMap { UInt16(String(cString: $0)) } ?? 53
 
 final class Store: @unchecked Sendable {
     private var lock = pthread_mutex_t()
@@ -112,6 +115,7 @@ func resolve(_ query: [UInt8], tcp: Bool, reply: ([UInt8]) -> Void) {
     guard let q = Question(query) else { return }
     let c = store.current()
     let primary: Via = !c.allowlistOn || c.allowlisted(q.name) || reverseInRoutes(q.name, c) ? .vpn : .upstream
+    if primary == .upstream { return resolveOffList(query, q, tcp: tcp, config: c, reply: reply) }
     let servers: (Via) -> [String] = { $0 == .vpn ? c.vpn : c.upstream }
 
     if tcp {
@@ -169,6 +173,28 @@ func resolve(_ query: [UInt8], tcp: Bool, reply: ([UInt8]) -> Void) {
     learn(q, vpn: replies[.vpn], upstream: replies[.upstream], config: c)
 }
 
+/// A name off the allowlist: your network's resolver first, and the VPN's only when yours doesn't know
+/// the name (NXDOMAIN) or fails, so the VPN resolver never sees names your network can answer.
+func resolveOffList(_ query: [UInt8], _ q: Question, tcp: Bool, config c: Config, reply: ([UInt8]) -> Void) {
+    func ask(_ servers: [String]) -> [UInt8]? {
+        var last: [UInt8]?
+        for s in servers.prefix(2) {
+            guard let r = tcp ? exchangeTCP(query, server: s) : exchangeUDP(query, server: s, timeoutMs: 1200) else { continue }
+            if usable(r) { return r }
+            last = r
+        }
+        return last
+    }
+    let upstream = ask(c.upstream)
+    if let upstream, usable(upstream), Answers(upstream).rcode != 3 {
+        reply(upstream)
+        return learn(q, vpn: nil, upstream: upstream, config: c)
+    }
+    let vpn = ask(c.vpn)
+    if let r = vpn.flatMap({ Answers($0).rcode == 0 ? $0 : nil }) ?? upstream ?? vpn { reply(r) }
+    learn(q, vpn: vpn, upstream: upstream, config: c)
+}
+
 func usable(_ reply: [UInt8]) -> Bool {
     guard reply.count >= 12 else { return false }  // shorter than a DNS header (e.g. a broken TCP reply)
     let rcode = reply[3] & 0x0f
@@ -176,7 +202,12 @@ func usable(_ reply: [UInt8]) -> Bool {
 }
 
 func learn(_ q: Question, vpn: [UInt8]?, upstream: [UInt8]?, config c: Config) {
-    guard let vpn, !q.name.hasSuffix(".arpa"), !q.name.hasSuffix(".local"), q.name.contains(".") else { return }
+    guard !q.name.hasSuffix(".arpa"), !q.name.hasSuffix(".local"), q.name.contains(".") else { return }
+    guard let vpn else {
+        // Only your network's resolver was asked (a name off the allowlist); it can still point into the VPN.
+        if let upstream, let ip = Answers(upstream).ipv4.first(where: c.inRoutes) { store.learned(q.name, formatIPv4(ip)) }
+        return
+    }
     let answers = Answers(vpn)
     if let ip = answers.ipv4.first(where: c.inRoutes) {
         store.learned(q.name, formatIPv4(ip))
@@ -273,7 +304,7 @@ func sockaddr(for host: String, port: UInt16) -> (sockaddr_storage, socklen_t, I
 }
 
 func udpSocket(to server: String) -> Int32? {
-    guard let (addr, len, family) = sockaddr(for: server, port: 53) else { return nil }
+    guard let (addr, len, family) = sockaddr(for: server, port: serverPort) else { return nil }
     var ss = addr
     let fd = socket(family, SOCK_DGRAM, 0)
     guard fd >= 0 else { return nil }
@@ -282,8 +313,25 @@ func udpSocket(to server: String) -> Int32? {
     return fd
 }
 
+/// One query over UDP, waiting up to `timeoutMs` for the matching reply.
+func exchangeUDP(_ query: [UInt8], server: String, timeoutMs: UInt64) -> [UInt8]? {
+    guard let fd = udpSocket(to: server) else { return nil }
+    defer { close(fd) }
+    _ = query.withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
+    let deadline = uptimeMs() + timeoutMs
+    while uptimeMs() < deadline {
+        var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        guard poll(&p, 1, Int32(deadline - uptimeMs())) == 1 else { return nil }
+        var buf = [UInt8](repeating: 0, count: 65535)
+        let n = recv(fd, &buf, buf.count, 0)
+        if n < 0 { return nil }  // e.g. port unreachable
+        if n >= 12, buf[0] == query[0], buf[1] == query[1], buf[2] & 0x80 != 0 { return Array(buf[0..<n]) }
+    }
+    return nil
+}
+
 func exchangeTCP(_ query: [UInt8], server: String) -> [UInt8]? {
-    guard let (addr, len, family) = sockaddr(for: server, port: 53) else { return nil }
+    guard let (addr, len, family) = sockaddr(for: server, port: serverPort) else { return nil }
     var ss = addr
     let fd = socket(family, SOCK_STREAM, 0)
     guard fd >= 0 else { return nil }

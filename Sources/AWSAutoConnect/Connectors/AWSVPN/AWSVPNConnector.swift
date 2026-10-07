@@ -32,6 +32,8 @@ final class AWSVPNConnector: TunnelConnector {
     /// Whether the root helper is installed. Kept here (not read from disk in views) so the panel
     /// updates when it changes; refreshed every tick and after installing or uninstalling.
     private(set) var helperInstalled = VPNHelper.isInstalled
+    /// Installed by an older app version; the panel offers Update Helper…
+    private(set) var helperOutdated = VPNHelper.isOutdated
     private(set) var installingHelper = false
     let domains: VPNDomains
 
@@ -103,6 +105,15 @@ final class AWSVPNConnector: TunnelConnector {
         return [ConnectorAction(title: "Connect") { [weak self] in await self?.connect() }]
     }
 
+    /// Safe while connected: the installer replaces files rather than rewriting them, so what's
+    /// running keeps its copy, and the next connect uses the new one.
+    var notice: (title: String, action: ConnectorAction)? {
+        guard helperOutdated, !installingHelper else { return nil }
+        return ("Helper update available", ConnectorAction(title: "Update Helper…") { [weak self] in
+            await self?.installFromStatus()
+        })
+    }
+
     /// What the Status row says and offers while the helper isn't installed.
     static func setup(hasProfiles: Bool) -> (summary: String, action: String, enabled: Bool) {
         hasProfiles
@@ -110,10 +121,11 @@ final class AWSVPNConnector: TunnelConnector {
             : ("Add a profile in AWS VPN Client first", "Install Helper…", false)
     }
 
-    /// Same as the VPN tab's Install Helper…, for the selected profile (or the first one).
+    /// Same as the VPN tab's Install Helper…, for the installed profile, else the selected one (or the first).
     private func installFromStatus() async {
         let profiles = VPNProfile.all()
-        guard let profile = profiles.first(where: { $0.name == profileName }) ?? profiles.first else { return }
+        let name = VPNHelper.installedProfileName ?? profileName
+        guard let profile = profiles.first(where: { $0.name == name }) ?? profiles.first else { return }
         do {
             try await installHelper(profile)
         } catch is CancellationError {
@@ -144,6 +156,8 @@ final class AWSVPNConnector: TunnelConnector {
     private func refreshHelper() {
         let now = VPNHelper.isInstalled
         if now != helperInstalled { helperInstalled = now }
+        let outdated = VPNHelper.isOutdated
+        if outdated != helperOutdated { helperOutdated = outdated }
     }
 
     var settingsPages: [SettingsPage] {

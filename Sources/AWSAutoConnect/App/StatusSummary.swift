@@ -8,12 +8,15 @@ struct StatusSummary: Equatable {
         let short: String
         let status: ConnectorStatus
         let isTunnel: Bool
+        var notice: String?
     }
 
     enum Fix: Equatable {
         case signIn
         /// The first action of the connector at this index.
         case action(Int)
+        /// The notice's action of the connector at this index.
+        case notice(Int)
     }
 
     var health: ConnectorStatus.Health
@@ -32,6 +35,9 @@ struct StatusSummary: Equatable {
         }
         if let busy = rows.first(where: { $0.status.health == .busy }) {
             return .init(health: .busy, title: busy.status.summary)
+        }
+        if let i = rows.firstIndex(where: { $0.notice != nil }) {
+            return .init(health: .busy, title: rows[i].notice!, detail: rows[i].name, fix: .notice(i))
         }
         if let tunnel = rows.first(where: { $0.isTunnel && $0.status.health == .idle }) {
             return .init(health: .idle, title: "\(tunnel.short) off")

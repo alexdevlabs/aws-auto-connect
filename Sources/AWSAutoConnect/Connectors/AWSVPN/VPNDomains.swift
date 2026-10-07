@@ -65,13 +65,41 @@ final class VPNDomains {
     }
 
     /// Adds a domain (covers its subdomains too). Accepts "*.foo.com" and ".foo.com".
-    func allow(_ raw: String) {
+    func allow(_ raw: String) { allow(all: [raw]) }
+
+    /// Adds several domains in one change.
+    func allow(all raws: [String]) { setAllowlist(Self.allowlist(allowlist, adding: raws)) }
+
+    /// Replaces the whole list (Edit as Text…).
+    func replaceAllowlist(with raws: [String]) { setAllowlist(Self.allowlist([], adding: raws)) }
+
+    private func setAllowlist(_ list: [String]) { if list != allowlist { allowlist = list } }
+
+    /// `list` plus each domain, dropping entries a new one covers; sorted.
+    nonisolated static func allowlist(_ list: [String], adding raws: [String]) -> [String] {
+        raws.compactMap(normalized).reduce(list) { list, d in
+            list.contains(d) || list.contains { d.hasSuffix("." + $0) } ? list
+                : list.filter { $0 != d && !$0.hasSuffix("." + d) } + [d]
+        }.sorted()
+    }
+
+    /// "*.Foo.com." → "foo.com"; nil when it isn't a hostname with a dot.
+    nonisolated static func normalized(_ raw: String) -> String? {
         var d = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         while d.hasPrefix("*.") || d.hasPrefix(".") { d.removeFirst(d.hasPrefix("*.") ? 2 : 1) }
         while d.hasSuffix(".") { d.removeLast() }
-        guard d.contains("."), d.range(of: #"^[a-z0-9_.-]+$"#, options: .regularExpression) != nil,
-              !allowlist.contains(d) else { return }
-        allowlist = (allowlist.filter { $0 != d && !$0.hasSuffix("." + d) } + [d]).sorted()
+        guard d.contains("."), d.range(of: #"^[a-z0-9_-]+(\.[a-z0-9_-]+)+$"#, options: .regularExpression) != nil else { return nil }
+        return d
+    }
+
+    /// Hostnames in pasted text: one per line, or separated by spaces or commas; `#` starts a comment.
+    /// Without duplicates; anything that isn't a hostname is skipped.
+    nonisolated static func importable(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text.split(whereSeparator: \.isNewline)
+            .flatMap { $0.prefix { $0 != "#" }.split { $0 == "," || $0.isWhitespace } }
+            .compactMap { normalized(String($0)) }
+            .filter { seen.insert($0).inserted }
     }
 
     func remove(_ domain: String) { allowlist.removeAll { $0 == domain } }

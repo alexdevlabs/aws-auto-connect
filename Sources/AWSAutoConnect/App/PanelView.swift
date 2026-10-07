@@ -174,6 +174,7 @@ private struct StatusSection: View {
         switch summary.fix {
         case .signIn: return ConnectorAction(title: "Sign In…") { model.showSignIn() }
         case .action(let i): return model.connectors.indices.contains(i) ? model.connectors[i].actions.first : nil
+        case .notice(let i): return model.connectors.indices.contains(i) ? model.connectors[i].notice?.action : nil
         case nil: return nil
         }
     }

@@ -25,6 +25,7 @@ for f in openvpn dns-relay vpn-helper dns.sh; do
   install -o root -g wheel -m 755 "$SRC/$f" "$DIR/$f"
 done
 rm -f "$DIR/dns-up.sh" "$DIR/dns-down.sh"  # replaced by dns.sh
+install -o root -g wheel -m 644 "$SRC/helper-version" "$DIR/version"  # the app compares it with its own
 
 # Keep only plain client directives and inline certificates. Anything that can
 # run code (up, down, plugin, script-security, ...) is dropped, as are remote and

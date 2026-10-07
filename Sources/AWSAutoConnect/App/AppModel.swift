@@ -139,7 +139,7 @@ final class AppModel {
     var summary: StatusSummary? {
         let rows = connectors.map {
             StatusSummary.Row(name: type(of: $0).displayName, short: $0.title, status: $0.status,
-                              isTunnel: $0 is any TunnelConnector)
+                              isTunnel: $0 is any TunnelConnector, notice: $0.notice?.title)
         }
         return StatusSummary.make(rows, signInProvider: signInNeeded ? (browser.waitingProvider ?? "Your provider") : nil)
     }

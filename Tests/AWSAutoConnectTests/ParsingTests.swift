@@ -90,6 +90,22 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(VPNDomains.group(of: "corp.co.uk"), "corp.co.uk")
     }
 
+    func testImportable() {
+        let pasted = """
+        # work
+        git.corp.example
+        *.Svc.Corp.Example., wiki.corp.example  wiki.corp.example
+        localhost   not a host!   a..b   .docs.example
+        """
+        XCTAssertEqual(VPNDomains.importable(pasted),
+                       ["git.corp.example", "svc.corp.example", "wiki.corp.example", "docs.example"])
+        XCTAssertNil(VPNDomains.normalized("localhost"))
+        XCTAssertEqual(VPNDomains.normalized(" *.Foo.com. "), "foo.com")
+        // A parent replaces the names it covers, and covered names aren't added.
+        XCTAssertEqual(VPNDomains.allowlist(["a.corp.example", "x.org"], adding: ["corp.example", "b.corp.example", "y.org"]),
+                       ["corp.example", "x.org", "y.org"])
+    }
+
     func testStatusSummary() {
         func row(_ short: String, _ health: ConnectorStatus.Health, _ summary: String, tunnel: Bool = false) -> StatusSummary.Row {
             .init(name: "AWS \(short)", short: short, status: .init(health: health, summary: summary), isTunnel: tunnel)
@@ -107,6 +123,11 @@ final class ParsingTests: XCTestCase {
                                           signInProvider: nil),
                        .init(health: .attention, title: "Helper is not installed", detail: "AWS VPN", fix: .action(1)))
         XCTAssertEqual(StatusSummary.make([sso], signInProvider: "Google")?.fix, .signIn)
+        // A notice beats "All connected" and "VPN off", and offers its own action.
+        var vpn = row("VPN", .ok, "Connected", tunnel: true)
+        vpn.notice = "Helper update available"
+        XCTAssertEqual(StatusSummary.make([sso, vpn], signInProvider: nil),
+                       .init(health: .busy, title: "Helper update available", detail: "AWS VPN", fix: .notice(1)))
     }
 
     func testGrafanaCheck() {
