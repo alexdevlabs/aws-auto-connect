@@ -3,8 +3,8 @@
 class AwsAutoconnect < Formula
   desc "Menu bar app that keeps AWS SSO signed in and connects AWS Client VPN (SAML)"
   homepage "https://github.com/alexdevlabs/aws-auto-connect"
-  url "https://github.com/alexdevlabs/aws-auto-connect/archive/refs/tags/v1.0.7.tar.gz"
-  sha256 "76a884d46d535c7e72af6d94bfeec470a08b78500675461dd62adf7680cfbf30"
+  url "https://github.com/alexdevlabs/aws-auto-connect/archive/refs/tags/v1.1.0.tar.gz"
+  sha256 "507731e2c872f2efcb6ac1dfc1ca870af72ddb0927abeee31b2b8455dda4e438"
   license "MIT"
   head "https://github.com/alexdevlabs/aws-auto-connect.git", branch: "main"
 
