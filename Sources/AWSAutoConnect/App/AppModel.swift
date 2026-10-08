@@ -1,4 +1,5 @@
 import AppKit
+import Network
 import Observation
 import SwiftUI
 import UserNotifications
@@ -23,6 +24,11 @@ final class AppModel {
     var showingSettings = false
     @ObservationIgnored private var instances: [UUID: any Connector] = [:]
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private let network = NWPathMonitor()
+    /// False while the Mac has no network (e.g. just after waking, before Wi-Fi is back): checks wait
+    /// rather than fail and start a sign-in that can't work.
+    @ObservationIgnored private var online = true
+    @ObservationIgnored private var backOnline: Task<Void, Never>?
     @ObservationIgnored private let log = AppLog("app")
 
     init() {
@@ -34,6 +40,7 @@ final class AppModel {
             self?.connectors.contains { ($0 as? any TunnelConnector)?.isConnected == true } ?? false
         }
         context.showSignIn = { [weak self] in self?.showSignIn() }
+        context.isOnline = { [weak self] in self?.online ?? true }
         updater.notify = { [weak self] title, body in self?.post(title, body) }
         updater.tunnelUp = { [weak self] in self?.context.tunnelUp() ?? false }
         updater.vpnConnected = { [weak self] in
@@ -44,6 +51,7 @@ final class AppModel {
     }
 
     func start() {
+        log.info("started v\(Updater.current) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(Bundle.main.bundlePath)")
         browser.onNeedsUserChange = { [weak self] needed in
             guard let self else { return }
             signInNeeded = needed
@@ -68,6 +76,11 @@ final class AppModel {
                 self?.tick(afterWake: true)
             }
         }
+        network.pathUpdateHandler = { [weak self] path in
+            let up = path.status == .satisfied
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.networkChanged(up) } }
+        }
+        network.start(queue: .global(qos: .utility))
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -188,9 +201,28 @@ final class AppModel {
 
     // MARK: Schedule
 
+    /// Connectors always tick (local checks, like whether the tunnel dropped, keep running); each one
+    /// holds back what needs the network while `context.isOnline()` is false.
     func tick(afterWake: Bool = false) {
         for c in connectors { c.tick(afterWake: afterWake) }
-        updater.tick()
+        if online { updater.tick() }
+    }
+
+    private func networkChanged(_ up: Bool) {
+        guard up != online else { return }
+        online = up
+        log.info(up ? "network is back, checking in a few seconds" : "network is down, holding checks")
+        // One pending check, even when the link flaps.
+        backOnline?.cancel()
+        backOnline = nil
+        guard up else { return }
+        // DNS can take a moment longer than the link; then check as after a wake.
+        backOnline = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, !Task.isCancelled, self.online else { return }
+            self.backOnline = nil
+            self.tick(afterWake: true)
+        }
     }
 
     // MARK: Actions

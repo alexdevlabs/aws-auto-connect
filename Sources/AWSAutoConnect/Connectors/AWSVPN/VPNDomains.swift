@@ -181,7 +181,7 @@ final class VPNDomains {
         try? Data(text.utf8).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
         let r = await Shell.run("/usr/bin/sudo", ["-n", VPNHelper.helper, "dns-config", file.path], timeout: 15)
-        if r.status != 0 { log.error("dns-config failed: \(r.lastLine)") }
+        if r.status != 0 { log.error("dns-config failed: \(r.summary)") }
     }
 
     // MARK: Learned

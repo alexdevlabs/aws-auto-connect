@@ -118,8 +118,16 @@ page's **Uninstall…** removes all of it. More in [SECURITY.md](SECURITY.md).
 
 ## Logs
 
-- App: `~/Library/Logs/AWSAutoConnect.log` (a sign-in that gives up logs the page it was stuck on and
-  saves `AWSAutoConnect-stuck.png` next to it)
+Something not working? Open **Settings ▸ General ▸ Logs** and click **Save as Zip**: it puts the logs
+in your Downloads folder, ready to attach to an issue. Tokens, keys, codes and email addresses are
+masked. Snapshots of stuck sign-in pages stay out of the zip, since a picture can't be masked; attach
+`AWSAutoConnect-stuck.png` yourself (⋯ ▸ Show in Finder) if you're happy to share it. ⋯ ▸ **Clear Logs…**
+deletes the app's logs.
+
+- App: `~/Library/Logs/AWSAutoConnect.log`, with every sign-in step: the command's output, each page the
+  hidden browser loads, what it clicked or why it's waiting (e.g. no button matched), and each check that
+  failed. A sign-in that gives up logs the page it was stuck on and saves `AWSAutoConnect-stuck.png` next
+  to it. Past 2 MB it starts over, keeping the previous file as `AWSAutoConnect.old.log`.
 - Tunnel: `/var/log/aws-autoconnect.log`
 - DNS relay: `/var/log/aws-autoconnect-dns.log`
 

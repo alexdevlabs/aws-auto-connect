@@ -182,7 +182,10 @@ final class AWSVPNConnector: TunnelConnector {
         let dropped = checkTunnel()
         let shouldReconnect = reconnect && !context.isQuiet && wantsConnection && !isBusy
         if dropped || (afterWake && !VPNHelper.isTunnelRunning && wantsConnection) {
-            if shouldReconnect {
+            if shouldReconnect, !context.isOnline() {
+                // Can't resolve the endpoint now; the tick when the network is back reconnects.
+                if dropped { log.info("tunnel dropped while offline, reconnecting when the network is back") }
+            } else if shouldReconnect {
                 log.info("reconnecting VPN")
                 Task { await connect() }
             } else if dropped {
@@ -260,7 +263,7 @@ final class AWSVPNConnector: TunnelConnector {
             defer { try? FileManager.default.removeItem(at: auth) }
 
             let r = await Shell.run("/usr/bin/sudo", ["-n", VPNHelper.helper, "connect", ip, ep.port, ep.proto, auth.path], timeout: 30)
-            guard r.status == 0 else { throw AppError("Helper failed: \(r.lastLine)") }
+            guard r.status == 0 else { throw AppError("Helper failed: \(r.summary)") }
             try await waitForTunnel()  // Disconnect, which cancelled us, stops the tunnel after this
             state = .connected
             log.info("connected")
@@ -340,7 +343,7 @@ final class AWSVPNConnector: TunnelConnector {
         if challenge == nil, let line = result.output.split(separator: "\n").first(where: { $0.contains("CRV1") }) {
             challenge = Self.parseChallenge(String(line))
         }
-        guard let challenge else { throw AppError("No SAML challenge from VPN: \(result.lastLine)") }
+        guard let challenge else { throw AppError("No SAML challenge from VPN: \(result.summary)") }
         return challenge
     }
 

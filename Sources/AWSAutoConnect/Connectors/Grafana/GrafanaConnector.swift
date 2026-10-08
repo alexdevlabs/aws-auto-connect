@@ -22,12 +22,20 @@ final class GrafanaConnector: Connector {
     }
 
     var config: ConnectorConfig { didSet { context.store.save(config) } }
-    private(set) var state: State = .unknown
+    private(set) var state: State = .unknown {
+        didSet { if Self.kind(state) != Self.kind(oldValue) { log.info("now: \(status.summary)") } }
+    }
     @ObservationIgnored private let context: ConnectorContext
     @ObservationIgnored private var lastCheck: Date?
     @ObservationIgnored private var retryAfter: Date?
     @ObservationIgnored private var checking = false
     @ObservationIgnored private let log = AppLog("grafana")
+    /// The setup last written to the log, so it's logged again only when it changes.
+    @ObservationIgnored private var loggedSetup: String?
+    /// The last failed check and note written to the log: a check that keeps failing the same way
+    /// (every few minutes while signed out) is logged once, not every time.
+    @ObservationIgnored private var loggedFailure: String?
+    @ObservationIgnored private var loggedNote: String?
 
     init(config: ConnectorConfig, context: ConnectorContext) {
         self.config = config
@@ -103,8 +111,14 @@ final class GrafanaConnector: Connector {
         [SettingsPage("grafana", title: title, height: 380) { GrafanaSettings(connector: self) }]
     }
 
+    /// Ignores the check time, so a fresh "Signed in" isn't logged every few minutes.
+    private static func kind(_ state: State) -> String {
+        if case .valid = state { return "valid" }
+        return "\(state)"
+    }
+
     func tick(afterWake: Bool) {
-        guard state != .refreshing, !checking else { return }
+        guard state != .refreshing, !checking, context.isOnline() else { return }
         if onlyWithVPN, !context.tunnelUp() {
             state = .waitingForVPN
             return
@@ -112,7 +126,19 @@ final class GrafanaConnector: Connector {
         let due = afterWake || state == .waitingForVPN
             || (lastCheck ?? .distantPast).addingTimeInterval(Double(max(1, checkMinutes) * 60)) < Date()
         guard due else { return }
-        Task { await check(autoSignIn: autoRefresh && !context.isQuiet) }
+        let then: OnSignedOut = !autoRefresh ? .hold("auto sign-in is off")
+            : context.isQuiet ? .hold("quiet hours") : .signIn
+        checking = true  // now, so a tick right behind this one doesn't start a second check
+        Task { await check(ifSignedOut: then) }
+    }
+
+    /// What a check does when it finds you signed out.
+    enum OnSignedOut: Equatable {
+        case signIn
+        /// Don't sign in, for this reason (logged).
+        case hold(String)
+        /// Right after `gcx auth login`: `signIn()` reports it.
+        case report
     }
 
     // MARK: Check & sign in
@@ -142,24 +168,77 @@ final class GrafanaConnector: Connector {
         return c.isEmpty ? [] : ["--context", c]
     }
 
-    func check(autoSignIn: Bool) async {
-        guard let gcx else { state = .checkFailed("gcx not found"); return }
+    func check(ifSignedOut then: OnSignedOut) async {
+        guard let gcx else {
+            checking = false
+            if state != .checkFailed("gcx not found") { log.error("gcx not found in \(Shell.searchPath)") }
+            state = .checkFailed("gcx not found")
+            return
+        }
         checking = true
         defer { checking = false }
         lastCheck = Date()
-        let r = await Shell.run(gcx, contextArgs + ["api", "/api/user"], timeout: 30)
-        switch Self.classify(status: r.status, output: r.output) {
+        await logSetup(gcx)
+        let args = contextArgs + ["api", "/api/user"]
+        let r = await Shell.run(gcx, args, timeout: 30)
+        let result = Self.classify(status: r.status, output: r.output)
+        let failure = "\(result) \(r.status) \(r.output)"
+        if result == .ok {
+            loggedFailure = nil
+            loggedNote = nil
+        } else if failure != loggedFailure {
+            loggedFailure = failure
+            log.info("gcx \(args.joined(separator: " ")) exited with \(r.status)\(r.status == 15 ? " (timed out after 30s)" : ""): \(result)")
+            log.output("gcx output", r.output)
+        }
+        switch result {
         case .ok:
             retryAfter = nil
             state = .valid(checked: Date())
         case .signedOut:
             state = .expired
-            if autoSignIn, (retryAfter ?? .distantPast) < Date() {
-                log.info("signed out, signing in")
-                await signIn()
+            switch then {
+            case .report:
+                break
+            case .hold(let reason):
+                note("not signing in by itself: \(reason)")
+            case .signIn:
+                if let retryAfter, retryAfter > Date() {
+                    note("last sign-in failed, trying again after \(retryAfter.formatted(date: .omitted, time: .shortened))")
+                } else {
+                    loggedNote = nil
+                    log.info("signed out, signing in")
+                    await signIn()
+                }
             }
         case .error:
-            state = .checkFailed(Self.errorSummary(r.output) ?? (r.lastLine.isEmpty ? "exit \(r.status)" : r.lastLine))
+            state = .checkFailed(Self.errorSummary(r.output) ?? (r.summary.isEmpty ? "exit \(r.status)" : r.summary))
+        }
+    }
+
+    /// Logs `line` unless it's the same as the last note.
+    private func note(_ line: String) {
+        guard line != loggedNote else { return }
+        loggedNote = line
+        log.info(line)
+    }
+
+    /// Which gcx, its version and the settings in use, whenever any of them changes.
+    private func logSetup(_ gcx: String) async {
+        let setup = [gcx, contextName, stackHost, loginArguments, "\(onlyWithVPN)", "\(autoRefresh)"].joined(separator: "\u{1}")
+        guard setup != loggedSetup else { return }
+        loggedSetup = setup
+        let version = await Shell.run(gcx, ["--version"], timeout: 10)
+        let v = version.status == 0 ? version.lastLine : "unknown (--version exited with \(version.status))"
+        let c = contextName.trimmingCharacters(in: .whitespaces)
+        let host = stackHost.trimmingCharacters(in: .whitespaces)
+        log.info("""
+            gcx \(gcx), version \(v); context \(c.isEmpty ? "gcx's current" : c); \
+            stack host \(host.isEmpty ? "not set" : host); login arguments \(loginArguments.isEmpty ? "none" : loginArguments); \
+            auto sign-in \(autoRefresh ? "on" : "off"); only with VPN \(onlyWithVPN ? "on" : "off")
+            """)
+        if host.isEmpty {
+            log.info("no stack host set: the browser only clicks on grafana.com and grafana.net pages")
         }
     }
 
@@ -187,15 +266,17 @@ final class GrafanaConnector: Connector {
         let provider = context.provider(for: config)
         let rules = approvals
         let extra = loginArguments.split(whereSeparator: \.isWhitespace).map(String.init)
+        log.info("signing in with \(provider.name), clicking on \(rules.hosts.joined(separator: ", "))")
         do {
             try await CLILogin(browser: context.browser, name: "Grafana", executable: gcx,
                                arguments: contextArgs + ["auth", "login"] + extra) { url in
                 BrowserJob(url: url, providers: [provider], approvals: [rules])
             }.run()
-            log.info("gcx auth login ok")
+            log.info("gcx auth login ok, checking again")
             retryAfter = nil
             state = .unknown
-            await check(autoSignIn: false)
+            await check(ifSignedOut: .report)
+            if state == .expired { log.error("still signed out after gcx auth login: check the context and stack host") }
         } catch {
             log.error("grafana sign-in failed: \(error.localizedDescription)")
             retryAfter = Date().addingTimeInterval(5 * 60)

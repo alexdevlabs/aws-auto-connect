@@ -15,6 +15,9 @@ struct CLILogin {
     let job: (URL) -> BrowserJob
     /// Give up after this long unless you're busy signing in (then after 10 minutes).
     var timeout: Int = 120
+    /// Give up if the command hasn't given a sign-in URL by then: it's usually stuck retrying a
+    /// network that isn't there (e.g. just after waking up).
+    var urlTimeout: Int = 30
 
     private let log = AppLog("login")
 
@@ -37,23 +40,40 @@ struct CLILogin {
     private func runExclusive() async throws {
         let shim = try OpenShim()
         defer { shim.remove() }
-        log.info("running \((executable as NSString).lastPathComponent) \(arguments.prefix(2).joined(separator: " "))")
+        let tool = (executable as NSString).lastPathComponent
+        log.info("running \(executable) \(arguments.joined(separator: " "))")
+        let started = Date()
 
         let proc = StreamingProcess(executable, arguments, environment: shim.environment(Shell.environment))
-        let picker = LoginURLPicker { [browser, job] url in browser.automate(job(url)) }
-        proc.onLine = { line in picker.consume(line) }
-        let opened = Task {
-            for await url in shim.urls() { picker.offer(url) }
+        let picker = LoginURLPicker { [browser, job, log] url in
+            log.info("opening \(url.host ?? "?")\(url.path) in the hidden browser")
+            browser.automate(job(url))
+        }
+        proc.onLine = { [log] line in
+            if !line.trimmingCharacters(in: .whitespaces).isEmpty { log.info("\(tool)| \(line.prefix(500))") }
+            picker.consume(line)
+        }
+        let opened = Task { [log] in
+            for await url in shim.urls() {
+                log.info("\(tool) asked to open a URL")
+                picker.offer(url)
+            }
         }
 
-        let watchdog = Task { [browser, timeout] in
+        let watchdog = Task { [browser, timeout, urlTimeout] in
             var waited = 0
             while waited < 600 {
                 try? await Task.sleep(for: .seconds(5))
                 if Task.isCancelled { return }
                 waited += 5
+                if waited >= urlTimeout, !picker.fired {
+                    log.error("\(tool) gave no sign-in URL in \(waited)s, giving up")
+                    proc.terminate()
+                    return
+                }
                 if waited >= timeout, !browser.needsUser { break }
             }
+            log.error("\(tool) still running after \(waited)s, giving up")
             await browser.logStuckPage()
             proc.terminate()
         }
@@ -61,10 +81,19 @@ struct CLILogin {
         watchdog.cancel()
         opened.cancel()
         picker.cancel()
+        let seconds = Int(Date().timeIntervalSince(started))
+        if result.status == 0 {
+            log.info("\(tool) finished in \(seconds)s")
+        } else {
+            log.error("\(tool) exited with \(result.status) after \(seconds)s\(picker.fired ? "" : ", before giving a sign-in URL")")
+            // Unless the watchdog already did, record where the browser got to.
+            if result.status != 15, picker.fired { await browser.logStuckPage() }
+        }
         browser.stop()
 
         guard result.status == 0 else {
-            throw AppError(result.status == 15 ? "\(name) approval timed out" : "\(name) login failed: \(result.lastLine)")
+            if result.status == 15, !picker.fired { throw AppError("\(name) sign-in didn't start. Is the network up?") }
+            throw AppError(result.status == 15 ? "\(name) approval timed out" : "\(name) login failed: \(result.summary)")
         }
     }
 }
@@ -111,6 +140,9 @@ final class LoginURLPicker {
     func offer(_ url: String) { fire(url) }
 
     func cancel() { pending?.cancel() }
+
+    /// A URL went to the browser.
+    var fired: Bool { opened }
 
     private func fire(_ string: String) {
         guard !opened, let url = URL(string: string) else { return }

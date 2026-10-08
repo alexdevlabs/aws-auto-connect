@@ -28,7 +28,7 @@ final class PageScriptTests: XCTestCase {
 
     func testGoogleSAMLPostPassesThrough() async throws {
         let r = try await run("<p>Redirecting…</p>", at: "https://accounts.google.com/o/saml2/idp?idpid=x")
-        XCTAssertEqual(r, "wait")
+        XCTAssertEqual(r, "wait:passing through Google")
     }
 
     func testGoogleTwoStepNeedsUser() async throws {
@@ -50,14 +50,14 @@ final class PageScriptTests: XCTestCase {
 
     func testDisabledButtonIsNotClicked() async throws {
         let r = try await run("<button disabled>Allow access</button>", at: "https://myorg.awsapps.com/start/")
-        XCTAssertEqual(r, "wait")
+        XCTAssertEqual(r, "wait:no button matches ^(confirm and continue|allow access|allow|approve|confirm)$; buttons []")
     }
 
     func testGenericFallbackOnUnknownProvider() async throws {
         let r = try await run("<form><input name=u><input type=password></form>", at: "https://login.example-idp.com/")
         XCTAssertEqual(r, "login:\(IdentityProvider.generic.name)")
         let none = try await run("<p>Loading</p>", at: "https://login.example-idp.com/")
-        XCTAssertEqual(none, "wait")
+        XCTAssertEqual(none, "wait:not an allowed page; buttons []")
     }
 
     func testServiceLoginButtonForProvider() async throws {
@@ -81,7 +81,7 @@ final class PageScriptTests: XCTestCase {
     func testApprovalWordsOnPlainLinksAreNotClicked() async throws {
         let html = "<a href=\"/elsewhere\">Continue</a><a href=\"/x\">OK</a>"
         let r = try await run(html, at: "https://myorg.grafana.net/a/app", approvals: [GrafanaConnector.approvalRules(stackHost: "")])
-        XCTAssertEqual(r, "wait")
+        XCTAssertEqual(r, "wait:no button matches ^(ok|authorize|approve|allow|allow access|confirm|continue)$; buttons []")
     }
 
     func testCustomProviderRules() async throws {
@@ -90,7 +90,7 @@ final class PageScriptTests: XCTestCase {
         let login = try await run("<input name=identifier>", at: "https://corp.okta.com/signin", providers: [okta])
         XCTAssertEqual(login, "login:Okta")
         let other = try await run("<p>Redirecting</p>", at: "https://corp.okta.com/app/sso/saml", providers: [okta])
-        XCTAssertEqual(other, "wait")
+        XCTAssertEqual(other, "wait:on Okta, nothing to do; 0 buttons")
     }
 
     // MARK: Helpers

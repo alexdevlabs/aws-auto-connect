@@ -199,7 +199,7 @@ final class DropdownPanel: NSPanel {
     func saveSnapshot(name: String? = nil) {
         guard let view = contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
-        let url = AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("AWSAutoConnect-panel\(name.map { "-" + $0 } ?? "").png")
+        let url = LogFiles.folder.appendingPathComponent("AWSAutoConnect-panel\(name.map { "-" + $0 } ?? "").png")
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 

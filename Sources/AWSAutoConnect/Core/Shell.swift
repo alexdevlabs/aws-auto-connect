@@ -7,6 +7,22 @@ struct ProcResult {
     var lastLine: String {
         output.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
     }
+
+    /// The line worth showing when the command failed: after "Error:", plus the first detail line
+    /// when that's only a heading (gcx: "Invalid configuration: missing contexts.x.org-id …");
+    /// otherwise the last line. Box-drawing frames and bullets are stripped.
+    var summary: String { Self.summary(of: output) }
+
+    nonisolated static func summary(of output: String) -> String {
+        let frame = CharacterSet(charactersIn: "│├└┌┐┘┬┴┼─╭╮╯╰┃━•|").union(.whitespaces)
+        let lines = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: frame) }.filter { !$0.isEmpty }
+        guard let i = lines.firstIndex(where: { $0.lowercased().hasPrefix("error:") }) else { return lines.last ?? "" }
+        let head = lines[i].dropFirst("error:".count).trimmingCharacters(in: .whitespaces)
+        let detail = lines[(i + 1)...].first { !$0.hasSuffix(":") && !$0.lowercased().hasPrefix("suggestion") }
+        guard let detail, head.count < 40, !head.contains(":") else { return head.isEmpty ? (detail ?? lines[i]) : head }
+        return head.isEmpty ? detail : "\(head): \(detail)"
+    }
 }
 
 struct AppError: LocalizedError {

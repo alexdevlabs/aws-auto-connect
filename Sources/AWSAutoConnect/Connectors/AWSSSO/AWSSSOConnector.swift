@@ -93,7 +93,7 @@ final class AWSSSOConnector: Connector {
     func tick(afterWake: Bool) {
         guard state != .refreshing else { return }
         read()
-        if autoRefresh, !context.isQuiet, needsRefresh, (retryAfter ?? .distantPast) < Date() {
+        if autoRefresh, !context.isQuiet, context.isOnline(), needsRefresh, (retryAfter ?? .distantPast) < Date() {
             log.info("auto refresh: \(status.summary)")
             Task { await refresh() }
         }
@@ -153,8 +153,16 @@ final class AWSSSOConnector: Connector {
                 log.info("silent refresh ok")
                 return
             }
+            if r.status != 0 {
+                log.info("export-credentials for \(profile) exited with \(r.status)")
+                log.output("aws output", r.output, lines: 8)
+            } else {
+                log.info("export-credentials ran but the token didn't get newer (still \(SSOCache.token(for: session.name)?.expiresAt.formatted() ?? "missing"))")
+            }
+        } else {
+            log.info("no profile uses SSO session \(session.name), so no silent refresh")
         }
-        log.info("silent refresh not possible, using browser approval")
+        log.info("silent refresh not possible, using browser approval (\(aws))")
         let provider = context.provider(for: config)
         try await CLILogin(browser: context.browser, name: "SSO", executable: aws,
                            arguments: ["sso", "login", "--sso-session", session.name, "--no-browser"]) { url in

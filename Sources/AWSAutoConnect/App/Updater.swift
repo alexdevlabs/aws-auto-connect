@@ -165,11 +165,11 @@ final class Updater {
         state = .updating(release, "Updating Homebrew")
         // A broken unrelated tap makes this fail; the upgrade below can still work.
         let update = await run(brew, ["update", "--quiet"], release: release, timeout: 300)
-        if update.status != 0 { log.error("brew update failed, upgrading anyway: \(update.lastLine)") }
+        if update.status != 0 { log.error("brew update failed, upgrading anyway: \(update.summary)") }
 
         state = .updating(release, "Building v\(release.version)")
         let upgrade = await run(brew, ["upgrade", "aws-autoconnect"], release: release, timeout: 1800)
-        guard upgrade.status == 0 else { return fail(release, "brew upgrade failed: \(upgrade.lastLine)") }
+        guard upgrade.status == 0 else { return fail(release, "brew upgrade failed: \(upgrade.summary)") }
 
         guard let built = AppInstaller.version(of: app), Self.isNewer(built, than: Self.current) else {
             return fail(release, "Homebrew doesn't have v\(release.version) yet. Try again later.")

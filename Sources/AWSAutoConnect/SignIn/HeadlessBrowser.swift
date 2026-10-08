@@ -119,10 +119,13 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
             var loginStreak = 0
             var offPageStreak = 0
             var reopened = 0
+            var trace = StepTrace()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(1200))
                 guard let self, !Task.isCancelled else { return }
-                let state = await self.step(script)
+                let result = await self.step(script)
+                let state = Self.parse(result)
+                if let line = trace.note(result, page: Self.short(self.webView.url)) { self.log.info(line) }
                 var provider: String?
                 if case .login(let name) = state { provider = name }
                 loginStreak = provider != nil ? loginStreak + 1 : 0
@@ -142,6 +145,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
                     self.log.info("needs user sign-in on \(self.webView.url?.host ?? "?")")
                 } else if provider == nil, self.needsUser, !self.onProviderPage {
                     // Signed in; go back to being invisible.
+                    self.log.info("left the sign-in page, hiding the browser")
                     self.needsUser = false
                     self.window.orderOut(nil)
                 }
@@ -222,19 +226,24 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
     }
 
     /// Logs what the page shows (and saves a snapshot next to the log) when a flow gives up on it.
+    /// On a sign-in provider's pages only the title and button count: account pickers show your name.
     func logStuckPage() async {
-        let probe = """
+        let probe = onProviderPage ? """
+        JSON.stringify({title: document.title,
+          buttons: document.querySelectorAll('button, input[type=submit], [role=button]').length})
+        """ : """
         JSON.stringify({title: document.title,
           buttons: [...document.querySelectorAll('button, input[type=submit], [role=button]')]
             .map(b => (b.innerText || b.value || '').trim() + (b.disabled || b.getAttribute('aria-disabled') === 'true' ? ' (disabled)' : '')).filter(s => s),
           text: (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, 400)})
         """
         let info = (try? await webView.evaluateJavaScript(probe) as? String) ?? "probe failed"
-        log.info("stuck on \(Self.short(webView.url)): \(info)")
+        log.info("stuck on \(Self.short(webView.url))\(webView.isLoading ? " (still loading)" : ""): \(info)")
         if let image = try? await webView.takeSnapshot(configuration: nil),
            let tiff = image.tiffRepresentation,
            let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-            try? png.write(to: AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("AWSAutoConnect-stuck.png"))
+            let file = LogFiles.folder.appendingPathComponent("AWSAutoConnect-stuck.png")
+            if (try? png.write(to: file)) != nil { log.info("saved a snapshot of it to \(file.lastPathComponent)") }
         }
     }
 
@@ -245,18 +254,38 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         window.makeKeyAndOrderFront(nil)
     }
 
-    private func step(_ script: String) async -> PageState {
-        guard let result = try? await webView.evaluateJavaScript(script) as? String else { return .wait }
-        return Self.parse(result, log: log)
+    /// What the page script said, or "wait:…" with why it couldn't run. Runs while the page is still
+    /// loading too: one slow image or tracker shouldn't hold up a button that's already there.
+    private func step(_ script: String) async -> String {
+        do {
+            return try await webView.evaluateJavaScript(script) as? String ?? "wait:script returned nothing"
+        } catch {
+            return "wait:script failed: \(error.localizedDescription)"
+        }
     }
 
-    static func parse(_ result: String, log: AppLog? = nil) -> PageState {
-        if result.hasPrefix("clicked:") {
-            log?.info(result)
-            return .clicked
-        }
+    static func parse(_ result: String) -> PageState {
+        if result.hasPrefix("clicked:") { return .clicked }
         if result.hasPrefix("login:") { return .login(provider: String(result.dropFirst("login:".count))) }
         return result == "done" ? .done : .wait
+    }
+
+    /// Turns the stream of page-script results into log lines: each change once, and a click that
+    /// keeps repeating (the page didn't react) now and then with a count.
+    struct StepTrace {
+        private var last: String?
+        private var repeats = 0
+
+        mutating func note(_ result: String, page: String) -> String? {
+            guard result != last else {
+                repeats += 1
+                let clicking = result.hasPrefix("clicked:")
+                return clicking && repeats % 10 == 0 ? "\(result) again (\(repeats + 1) times, the page isn't moving on) on \(page)" : nil
+            }
+            last = result
+            repeats = 0
+            return "\(result) on \(page)"
+        }
     }
 
     // MARK: Page script
@@ -280,7 +309,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         return "(\(pageScript))(\(json))"
     }
 
-    /// Runs on every poll and returns "wait", "done", "login:<provider>" or "clicked:<label>".
+    /// Runs on every poll and returns "wait:<why>", "done", "login:<provider>" or "clicked:<label>".
     /// Only clicks on provider pickers and on the connector's pages.
     static let pageScript = #"""
     (R) => {
@@ -302,11 +331,17 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
           if (found.length > 1) return 'login:' + p.name;
         }
         const path = location.pathname;
-        if ((p.passThrough || []).some(re => new RegExp(re).test(path))) return 'wait';
+        if ((p.passThrough || []).some(re => new RegExp(re).test(path))) return 'wait:passing through ' + p.name;
         return p.otherPagesNeedUser ? 'login:' + p.name : null;
       };
+      // Visible button labels, to log when nothing matched.
+      const seen = () => JSON.stringify(buttons().map(label).filter(l => l).slice(0, 12));
+      if (!document.body) return 'wait:no page yet';
 
-      for (const p of R.first) if (on(p.hosts)) return provider(p) || 'wait';
+      // Labels stay out of the log on provider pages: account pickers show names.
+      for (const p of R.first) if (on(p.hosts)) return provider(p) || 'wait:on ' + p.name + ', nothing to do; ' + buttons().length + ' buttons';
+
+      let missed = null;
 
       for (const a of R.approvals) {
         if (!on(a.hosts)) continue;
@@ -318,11 +353,12 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         const b = buttons().find(b => wanted.some(re => re.test(label(b))))
           || all('a[href]').find(l => services.some(re => re.test(label(l))));
         if (b) { const l = label(b); b.click(); return 'clicked:' + l; }
+        missed = 'wait:no button matches ' + a.buttons + '; buttons ' + seen();
         break;
       }
 
       for (const p of R.last) if (on(p.hosts)) { const s = provider(p); if (s) return s; }
-      return 'wait';
+      return missed || 'wait:not an allowed page; buttons ' + seen();
     }
     """#
 
@@ -359,17 +395,28 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
             if let image = try? await webView.takeSnapshot(configuration: nil),
                let tiff = image.tiffRepresentation,
                let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-                try? png.write(to: AppLog.fileURL.deletingLastPathComponent().appendingPathComponent("AWSAutoConnect-snapshot.png"))
+                try? png.write(to: LogFiles.folder.appendingPathComponent("AWSAutoConnect-snapshot.png"))
             }
         }
     }
 
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        log.info("redirect \(Self.short(webView.url))")
+    }
+
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        log.error("fail \(Self.short(webView.url)): \(error.localizedDescription)")
+        log.error("fail \(Self.short(webView.url)): \(Self.describe(error))")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        log.error("fail (provisional) \(Self.short(webView.url)): \(error.localizedDescription)")
+        log.error("fail (provisional) \(Self.short(webView.url)): \(Self.describe(error))")
+    }
+
+    /// The message plus domain and code (e.g. NSURLErrorDomain -1200 for a TLS problem).
+    private static func describe(_ error: Error) -> String {
+        let e = error as NSError
+        let failing = (e.userInfo[NSURLErrorFailingURLErrorKey] as? URL).map { " at \(short($0))" } ?? ""
+        return "\(e.localizedDescription) (\(e.domain) \(e.code))\(failing)"
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {

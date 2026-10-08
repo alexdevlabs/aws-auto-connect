@@ -14,6 +14,9 @@ struct GeneralSettings: View {
     @AppStorage(Prefs.Key.autoInstallUpdates.rawValue) private var autoInstallUpdates = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var error: String?
+    @State private var logSize: Int?
+    @State private var savingLogs = false
+    @State private var confirmingClear = false
 
     var body: some View {
         Form {
@@ -70,6 +73,42 @@ struct GeneralSettings: View {
                 Text("Updates")
             }
 
+            Section {
+                HStack {
+                    Text("Logs")
+                    if let logSize {
+                        Text("· \(logSize.formatted(.byteCount(style: .file)))").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Spacer()
+                    Button("Save as Zip…") { Task { await saveLogs() } }.disabled(savingLogs).fixedSize()
+                    Menu {
+                        Button("Show in Finder") { revealLog() }
+                        Button("Open in Console") { openInConsole() }
+                        Divider()
+                        Button("Clear Logs…", role: .destructive) { confirmingClear = true }.disabled(logSize == 0)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                }
+            } header: {
+                Text("Troubleshooting")
+            } footer: {
+                Text("Something not working? Save the logs and send the zip with your report. Tokens, codes and email addresses are masked.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .task { await refreshLogSize() }
+            .confirmationDialog("Clear the logs?", isPresented: $confirmingClear) {
+                Button("Clear", role: .destructive) {
+                    Task {
+                        await LogFiles.clear()
+                        await refreshLogSize()
+                    }
+                }
+            } message: {
+                Text("Deletes the app's log files and sign-in snapshots. The tunnel and DNS logs start over on every connect.")
+            }
+
             if let error {
                 Text(error).foregroundStyle(.red).font(.caption)
             }
@@ -87,6 +126,33 @@ struct GeneralSettings: View {
         case .updating(let r, let step): return "Updating to v\(r.version): \(step)…"
         case .failed(_, let message): return message
         }
+    }
+
+    private func revealLog() {
+        let files = LogFiles.appFiles()
+        NSWorkspace.shared.activateFileViewerSelecting(files.isEmpty ? [LogFiles.folder] : files)
+    }
+
+    private func openInConsole() {
+        let console = URL(fileURLWithPath: "/System/Applications/Utilities/Console.app")
+        NSWorkspace.shared.open([AppLog.fileURL], withApplicationAt: console, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    private func saveLogs() async {
+        savingLogs = true
+        defer { savingLogs = false }
+        do {
+            let zip = try await LogFiles.archive()
+            error = nil
+            NSWorkspace.shared.activateFileViewerSelecting([zip])
+        } catch let e {
+            error = e.localizedDescription
+        }
+        await refreshLogSize()
+    }
+
+    private func refreshLogSize() async {
+        logSize = await LogFiles.size()
     }
 
     private var hours: some View {

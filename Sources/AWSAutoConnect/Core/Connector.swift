@@ -115,6 +115,9 @@ final class ConnectorContext {
     var tunnelUp: () -> Bool = { false }
     /// Set by the app: opens the sign-in window (or the page a flow is waiting on).
     var showSignIn: () -> Void = {}
+    /// Set by the app: whether the Mac has a network. Checks that need one wait while it's false;
+    /// once it's back every connector is ticked as after a wake.
+    var isOnline: () -> Bool = { true }
 
     init(browser: HeadlessBrowser, providers: ProviderRegistry, store: ConnectorStore,
          notify: @escaping (_ title: String, _ body: String) -> Void) {

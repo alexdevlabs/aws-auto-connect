@@ -145,6 +145,62 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(HeadlessBrowser.parse("clicked:Allow access"), .clicked)
         XCTAssertEqual(HeadlessBrowser.parse("done"), .done)
         XCTAssertEqual(HeadlessBrowser.parse("wait"), .wait)
+        XCTAssertEqual(HeadlessBrowser.parse("wait:no button matches ^(ok)$; buttons [\"Cancel\"]"), .wait)
+    }
+
+    @MainActor
+    func testStepTrace() {
+        var t = HeadlessBrowser.StepTrace()
+        XCTAssertEqual(t.note("wait:loading", page: "a/"), "wait:loading on a/")
+        XCTAssertNil(t.note("wait:loading", page: "a/"))
+        XCTAssertNotNil(t.note("clicked:OK", page: "a/"))
+        for _ in 0..<9 { XCTAssertNil(t.note("clicked:OK", page: "a/")) }
+        XCTAssertEqual(t.note("clicked:OK", page: "a/"), "clicked:OK again (11 times, the page isn't moving on) on a/")
+        XCTAssertEqual(t.note("done", page: "a/"), "done on a/")
+    }
+
+    func testErrorSummary() {
+        let gcx = """
+            Error: Invalid configuration
+            │
+            │ Invalid configuration found in '':
+            │ missing contexts.dev.grafana.org-id or contexts.dev.grafana.stack-id
+            │
+            ├─ Suggestions:
+            │ • Review your configuration: gcx config view
+            └─
+            """
+        XCTAssertEqual(ProcResult.summary(of: gcx),
+                       "Invalid configuration: missing contexts.dev.grafana.org-id or contexts.dev.grafana.stack-id")
+        XCTAssertEqual(ProcResult.summary(of: "Error: request failed: 401 Unauthorized\nmore"), "request failed: 401 Unauthorized")
+        XCTAssertEqual(ProcResult.summary(of: "starting\nCould not connect to the endpoint URL\n"), "Could not connect to the endpoint URL")
+        XCTAssertEqual(ProcResult.summary(of: "fine\n└─\n"), "fine")
+        XCTAssertEqual(ProcResult.summary(of: ""), "")
+    }
+
+    func testRedact() {
+        let r = AppLog.redact
+        XCTAssertEqual(r("https://x.awsapps.com/start/#/device?user_code=ABCD-EFGH&x=1"),
+                       "https://x.awsapps.com/start/#/device?user_code=<redacted>&x=1")
+        XCTAssertEqual(r("enter code WXYZ-1234 in the browser"), "enter code <code> in the browser")
+        XCTAssertEqual(r(#"{"accessToken": "abc", "name": "me"}"#), #"{"accessToken": "<redacted>", "name": "me"}"#)
+        XCTAssertEqual(r("Authorization: Bearer abc.def-ghi"), "Authorization: Bearer <redacted>")
+        XCTAssertEqual(r("sent bearer glsa_Ab12Cd34Ef56 along"), "sent bearer <redacted> along")
+        XCTAssertEqual(r(#"{"AccessKeyId": "ASIAEXAMPLE", "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}"#),
+                       #"{"AccessKeyId": "<redacted>", "SecretAccessKey": "<redacted>"}"#)
+        XCTAssertEqual(r("AWS_SECRET_ACCESS_KEY=abc/def+ghi AWS_REGION=eu-central-1"),
+                       "AWS_SECRET_ACCESS_KEY=<redacted> AWS_REGION=eu-central-1")
+        XCTAssertEqual(r("secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY in text"), "secret <redacted> in text")
+        XCTAssertEqual(r("token eyJhbGciOi.eyJzdWIiOi.c2ln here"), "token <jwt> here")
+        XCTAssertEqual(r("signed in as someone@example.com"), "signed in as <email>")
+        XCTAssertEqual(r("key " + String(repeating: "a1B2", count: 12)), "key <redacted>")
+        // Paths, hosts, IDs and ordinary words stay readable.
+        for plain in ["dial tcp: lookup myorg.grafana.net: no such host (/Users/me/go/bin/gcx, exit 1)",
+                      "using basic settings, bearer of news",
+                      "connector E621E1F8-C36C-455F-AB12-0123456789AB saved",
+                      "/Users/alex/Library/Logs/AWSAutoConnect.log"] {
+            XCTAssertEqual(r(plain), plain)
+        }
     }
 }
 
