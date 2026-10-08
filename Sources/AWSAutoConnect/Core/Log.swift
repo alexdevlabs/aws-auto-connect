@@ -55,6 +55,8 @@ struct AppLog: Sendable {
 
     private nonisolated static let secretName = "[a-z0-9_]*(?:token|secret|password|passwd|key|code|session|credential|signature|sig|assertion|samlresponse|relaystate|state)[a-z0-9_]*"
     private nonisolated static let redactions: [(NSRegularExpression, String)] = [
+        // Command-line flags: --token abc, --password=abc, --api-key abc
+        (#"(?i)(\s|^)(--?[a-z0-9-]*(?:token|password|passwd|secret|key|credential)[a-z0-9-]*)(=|\s+)(?!-)[^\s"']+"#, "$1$2$3<redacted>"),
         // name=value in URLs and env vars (user_code=…, AWS_SECRET_ACCESS_KEY=…)
         (#"(?i)\b("# + secretName + #"=)[^&\s"']+"#, "$1<redacted>"),
         // "name": "value" in JSON ("SecretAccessKey", "accessToken", …)

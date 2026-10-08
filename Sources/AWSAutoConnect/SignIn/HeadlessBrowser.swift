@@ -225,8 +225,9 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         present()
     }
 
-    /// Logs what the page shows (and saves a snapshot next to the log) when a flow gives up on it.
-    /// On a sign-in provider's pages only the title and button count: account pickers show your name.
+    /// Logs the page's title and buttons (and saves a snapshot next to the log) when a flow gives up on
+    /// it. Never its text, which can name you; on a sign-in provider's pages only the button count,
+    /// since account pickers' buttons show your name.
     func logStuckPage() async {
         let probe = onProviderPage ? """
         JSON.stringify({title: document.title,
@@ -234,8 +235,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         """ : """
         JSON.stringify({title: document.title,
           buttons: [...document.querySelectorAll('button, input[type=submit], [role=button]')]
-            .map(b => (b.innerText || b.value || '').trim() + (b.disabled || b.getAttribute('aria-disabled') === 'true' ? ' (disabled)' : '')).filter(s => s),
-          text: (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, 400)})
+            .map(b => (b.innerText || b.value || '').trim() + (b.disabled || b.getAttribute('aria-disabled') === 'true' ? ' (disabled)' : '')).filter(s => s)})
         """
         let info = (try? await webView.evaluateJavaScript(probe) as? String) ?? "probe failed"
         log.info("stuck on \(Self.short(webView.url))\(webView.isLoading ? " (still loading)" : ""): \(info)")

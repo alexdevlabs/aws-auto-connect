@@ -178,6 +178,14 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(ProcResult.summary(of: ""), "")
     }
 
+    @MainActor
+    func testLoginArgumentsLeaveOutValues() {
+        XCTAssertEqual(CLILogin.describe(["sso", "login", "--sso-session", "base", "--no-browser"]),
+                       "sso login --sso-session … --no-browser")
+        XCTAssertEqual(CLILogin.describe(["--context", "dev", "auth", "login", "--token=abc", "--insecure"]),
+                       "--context … auth login --token=… --insecure")
+    }
+
     func testRedact() {
         let r = AppLog.redact
         XCTAssertEqual(r("https://x.awsapps.com/start/#/device?user_code=ABCD-EFGH&x=1"),
@@ -191,6 +199,9 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(r("AWS_SECRET_ACCESS_KEY=abc/def+ghi AWS_REGION=eu-central-1"),
                        "AWS_SECRET_ACCESS_KEY=<redacted> AWS_REGION=eu-central-1")
         XCTAssertEqual(r("secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY in text"), "secret <redacted> in text")
+        XCTAssertEqual(r("gcx auth login --token abc123 --password=hunter2 --api-key k --context dev"),
+                       "gcx auth login --token <redacted> --password=<redacted> --api-key <redacted> --context dev")
+        XCTAssertEqual(r("aws sso login --sso-session base --no-browser"), "aws sso login --sso-session base --no-browser")
         XCTAssertEqual(r("token eyJhbGciOi.eyJzdWIiOi.c2ln here"), "token <jwt> here")
         XCTAssertEqual(r("signed in as someone@example.com"), "signed in as <email>")
         XCTAssertEqual(r("key " + String(repeating: "a1B2", count: 12)), "key <redacted>")

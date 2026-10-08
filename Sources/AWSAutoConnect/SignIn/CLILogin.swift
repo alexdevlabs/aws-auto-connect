@@ -31,6 +31,24 @@ struct CLILogin {
         self.job = job
     }
 
+    /// The arguments with flag values left out ("sso login --sso-session … --no-browser"): extra login
+    /// arguments are free text and may hold a token.
+    nonisolated static func describe(_ arguments: [String]) -> String {
+        var out: [String] = []
+        var afterFlag = false
+        for arg in arguments {
+            if arg.hasPrefix("-") {
+                let name = arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg
+                out.append(arg.contains("=") ? name + "=…" : name)
+                afterFlag = !arg.contains("=")
+            } else {
+                out.append(afterFlag ? "…" : arg)
+                afterFlag = false
+            }
+        }
+        return out.joined(separator: " ")
+    }
+
     /// Takes the browser for itself (see `HeadlessBrowser.exclusive`) and returns once the command
     /// succeeds; throws with its last output line otherwise.
     func run() async throws {
@@ -41,7 +59,7 @@ struct CLILogin {
         let shim = try OpenShim()
         defer { shim.remove() }
         let tool = (executable as NSString).lastPathComponent
-        log.info("running \(executable) \(arguments.joined(separator: " "))")
+        log.info("running \(executable) \(Self.describe(arguments))")
         let started = Date()
 
         let proc = StreamingProcess(executable, arguments, environment: shim.environment(Shell.environment))
