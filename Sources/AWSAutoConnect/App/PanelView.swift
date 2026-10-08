@@ -24,11 +24,11 @@ struct PanelView: View {
             Divider()
             HStack {
                 if settings {
-                    Text("AWS Auto Connect v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("AWS Auto Connect \(version)").font(.caption).foregroundStyle(.secondary)
                 } else {
                     Button("Settings") { model.openSettings(nil) }
                         .keyboardShortcut(",")
+                    Text(version).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
@@ -38,6 +38,10 @@ struct PanelView: View {
             .padding(.vertical, 8)
         }
         .frame(width: 380)
+    }
+
+    private var version: String {
+        "v" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
     }
 }
 
@@ -154,6 +158,7 @@ private struct StatusSection: View {
                     Text("Nothing to keep connected. Turn on a connector in Settings.")
                         .font(.caption).foregroundStyle(.secondary).padding(.vertical, 8)
                 }
+                if !model.online { OfflineStrip() }
                 UpdateStrip(updater: model.updater)
                 if !model.connectors.isEmpty {
                     VStack(spacing: 0) {
@@ -224,6 +229,20 @@ private struct Toast: View {
 }
 
 /// Shown while there's an update to offer, it's installing, or installing failed.
+/// Shown while the Mac has no network: checks and reconnects wait for it instead of failing.
+private struct OfflineStrip: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.slash").foregroundStyle(.secondary)
+            Text("Offline. Checks will resume when the network is back.").font(.caption).lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 private struct UpdateStrip: View {
     let updater: Updater
 

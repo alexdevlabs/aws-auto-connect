@@ -30,8 +30,10 @@ enum LogFiles {
     /// ~/Downloads and returns the zip. Snapshots stay out: a sign-in page can show your name and
     /// email, which masking can't reach in a picture.
     @MainActor static func archive() async throws -> URL {
-        let stamp = Date().formatted(.iso8601.year().month().day().dateSeparator(.dash).time(includingFractionalSeconds: false).timeSeparator(.omitted))
-            .replacingOccurrences(of: "T", with: "-")
+        // Your local time, so the name matches when you saved it.
+        let stamp = Date().formatted(Date.VerbatimFormatStyle(
+            format: "\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits)-\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\(minute: .twoDigits)\(second: .twoDigits)",
+            timeZone: .current, calendar: Calendar(identifier: .gregorian)))
         let name = "AWSAutoConnect-logs-\(stamp)"
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)

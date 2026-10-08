@@ -27,7 +27,7 @@ final class AppModel {
     @ObservationIgnored private let network = NWPathMonitor()
     /// False while the Mac has no network (e.g. just after waking, before Wi-Fi is back): checks wait
     /// rather than fail and start a sign-in that can't work.
-    @ObservationIgnored private var online = true
+    private(set) var online = true
     @ObservationIgnored private var backOnline: Task<Void, Never>?
     @ObservationIgnored private let log = AppLog("app")
 
