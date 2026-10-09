@@ -159,6 +159,18 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(t.note("done", page: "a/"), "done on a/")
     }
 
+    @MainActor
+    func testLostPage() {
+        let u = { (s: String) in URL(string: s)! }
+        let cli = u("https://stack.example.net/a/assistant-app/cli/auth?state=x")
+        XCTAssertTrue(HeadlessBrowser.lostPage(of: cli, now: u("https://stack.example.net/")))
+        XCTAssertFalse(HeadlessBrowser.lostPage(of: cli, now: u("https://stack.example.net/a/assistant-app/cli/auth/")))
+        XCTAssertFalse(HeadlessBrowser.lostPage(of: cli, now: u("https://accounts.example.com/signin")))
+        let device = u("https://portal.example.com/start/#/device?user_code=AB-CD")
+        XCTAssertTrue(HeadlessBrowser.lostPage(of: device, now: u("https://portal.example.com/start/#/")))
+        XCTAssertFalse(HeadlessBrowser.lostPage(of: device, now: u("https://portal.example.com/start/#/device")))
+    }
+
     func testErrorSummary() {
         let gcx = """
             Error: Invalid configuration

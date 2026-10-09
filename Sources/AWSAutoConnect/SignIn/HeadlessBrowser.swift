@@ -8,9 +8,9 @@ struct BrowserJob {
     /// The chosen provider first; `IdentityProvider.generic` is always added as the last fallback.
     var providers: [IdentityProvider]
     var approvals: [ApprovalRules]
-    /// If a sign-in on the way drops the #fragment page (e.g. AWS's #/device?user_code=…) and lands on
-    /// the same host's home page instead, load `url` again.
-    var reopenIfFragmentLost = false
+    /// If a sign-in on the way drops the page (e.g. AWS's #/device?user_code=… or Grafana's
+    /// /a/…/cli/auth) and lands on the same host's home page instead, load `url` again.
+    var reopenIfPageLost = false
 }
 
 /// A connector's own pages, where the hidden browser clicks through approval prompts.
@@ -131,7 +131,7 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
                 loginStreak = provider != nil ? loginStreak + 1 : 0
                 // When the service's session has expired, it may send you through the provider and then
                 // land on its home page, forgetting the page you came for. Go back to it.
-                offPageStreak = job.reopenIfFragmentLost && state == .wait && self.lostPage(of: job.url) ? offPageStreak + 1 : 0
+                offPageStreak = job.reopenIfPageLost && state == .wait && self.lostPage(of: job.url) ? offPageStreak + 1 : 0
                 if offPageStreak == 3, reopened < 3 {
                     reopened += 1
                     offPageStreak = 0
@@ -153,12 +153,21 @@ final class HeadlessBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWin
         }
     }
 
-    /// On the same host as `url` but no longer on its #fragment page (e.g. the site's home).
+    /// On the same host as `url` but no longer on its page (e.g. the site's home).
     private func lostPage(of url: URL) -> Bool {
-        guard let wanted = url.fragment, !wanted.isEmpty, let now = webView.url, !webView.isLoading,
-              now.host == url.host else { return false }
-        let page = { (f: String) in f.split(separator: "?").first.map(String.init) ?? f }
-        return page(now.fragment ?? "") != page(wanted)
+        guard let now = webView.url, !webView.isLoading else { return false }
+        return Self.lostPage(of: url, now: now)
+    }
+
+    /// The page is the #fragment route when `wanted` has one, else the path.
+    static func lostPage(of wanted: URL, now: URL) -> Bool {
+        guard now.host == wanted.host else { return false }
+        if let fragment = wanted.fragment, !fragment.isEmpty {
+            let page = { (f: String) in f.split(separator: "?").first.map(String.init) ?? f }
+            return page(now.fragment ?? "") != page(fragment)
+        }
+        let trimmed = { (p: String) in p.hasSuffix("/") ? String(p.dropLast()) : p }
+        return trimmed(now.path) != trimmed(wanted.path)
     }
 
     func stop() {

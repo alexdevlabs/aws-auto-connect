@@ -270,7 +270,7 @@ final class GrafanaConnector: Connector {
         do {
             try await CLILogin(browser: context.browser, name: "Grafana", executable: gcx,
                                arguments: contextArgs + ["auth", "login"] + extra) { url in
-                BrowserJob(url: url, providers: [provider], approvals: [rules])
+                BrowserJob(url: url, providers: [provider], approvals: [rules], reopenIfPageLost: true)
             }.run()
             log.info("gcx auth login ok, checking again")
             retryAfter = nil

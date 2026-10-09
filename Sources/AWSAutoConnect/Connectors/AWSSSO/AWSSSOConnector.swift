@@ -166,7 +166,7 @@ final class AWSSSOConnector: Connector {
         let provider = context.provider(for: config)
         try await CLILogin(browser: context.browser, name: "SSO", executable: aws,
                            arguments: ["sso", "login", "--sso-session", session.name, "--no-browser"]) { url in
-            BrowserJob(url: url, providers: [provider], approvals: [Self.approvals], reopenIfFragmentLost: true)
+            BrowserJob(url: url, providers: [provider], approvals: [Self.approvals], reopenIfPageLost: true)
         }.run()
         log.info("aws sso login ok")
     }
